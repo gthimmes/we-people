@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, ApiError, ListResponse, Worker } from "../api";
 import { useAuth } from "../auth";
 
@@ -12,6 +13,7 @@ const empty = {
 
 export default function Directory() {
   const { me } = useAuth();
+  const navigate = useNavigate();
   const canWrite = me?.permissions.includes("worker:write");
 
   const [workers, setWorkers] = useState<Worker[]>([]);
@@ -133,7 +135,7 @@ export default function Directory() {
               </tr>
             ) : (
               workers.map((w) => (
-                <tr key={w.id}>
+                <tr key={w.id} className="clickable" onClick={() => navigate(`/people/${w.id}`)}>
                   <td className="mono">{w.employee_number}</td>
                   <td>
                     {w.first_name} {w.last_name}

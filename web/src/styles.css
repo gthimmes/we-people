@@ -270,6 +270,165 @@ tr:last-child td {
   color: #991b1b;
 }
 
+select {
+  font: inherit;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  width: 100%;
+  background: #fff;
+}
+
+/* Clickable table rows */
+tr.clickable {
+  cursor: pointer;
+}
+tr.clickable:hover td {
+  background: #f9fafb;
+}
+
+button.danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fff;
+}
+button.danger:hover {
+  background: #fef2f2;
+}
+button.small-btn {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+.back-link:hover {
+  color: var(--brand);
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.page-header h1 .badge {
+  vertical-align: middle;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+/* Detail layout */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.card h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+.fields {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px 12px;
+  margin: 0;
+}
+.fields dt {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+}
+.fields dd {
+  margin: 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.inline-form input {
+  width: auto;
+}
+.mt {
+  margin-top: 14px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.panel-head h3 {
+  margin: 0;
+}
+.panel-form {
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.list li:last-child {
+  border-bottom: none;
+}
+
+/* Timeline */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.timeline li {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0 16px;
+  position: relative;
+}
+.timeline li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 18px;
+  bottom: 0;
+  border-left: 2px solid var(--line);
+}
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--brand);
+  margin-top: 5px;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
 /* Org chart tree */
 .org-tree {
   overflow-x: auto;

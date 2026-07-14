@@ -4,6 +4,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,6 +44,16 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 const workerCols = `id, org_id, employee_number, first_name, last_name, preferred_name,
 	work_email, personal_email, phone, date_of_birth, hire_date, status, created_at, updated_at`
+
+// prefixed rewrites a comma-separated column list so each column carries the
+// given table alias, e.g. prefixed("w", "id, name") -> "w.id, w.name".
+func prefixed(alias, cols string) string {
+	parts := strings.Split(cols, ",")
+	for i, p := range parts {
+		parts[i] = alias + "." + strings.TrimSpace(p)
+	}
+	return strings.Join(parts, ", ")
+}
 
 func scanWorker(row pgx.Row) (Worker, error) {
 	var wk Worker
@@ -145,4 +156,91 @@ func (s *Store) LifecycleEvent(ctx context.Context, tx pgx.Tx, orgID, workerID u
 		VALUES ($1,$2,$3,$4,$5,$6)`,
 		orgID, workerID, eventType, effectiveDate, reason, createdBy)
 	return err
+}
+
+// SetStatusTx updates a worker's status within a transaction.
+func (s *Store) SetStatusTx(ctx context.Context, tx pgx.Tx, orgID, id uuid.UUID, status string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE workers SET status=$3, updated_at=now() WHERE org_id=$1 AND id=$2`,
+		orgID, id, status)
+	return err
+}
+
+// CloseOpenAssignmentsTx ends any open assignments for a worker as of endDate.
+// Used on termination. (Reads worker_assignments — owned by orgstructure — but
+// termination is a worker-centric operation, so it lives with the worker.)
+func (s *Store) CloseOpenAssignmentsTx(ctx context.Context, tx pgx.Tx, orgID, workerID uuid.UUID, endDate time.Time) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE worker_assignments SET end_date=$3
+		WHERE org_id=$1 AND worker_id=$2 AND end_date IS NULL`,
+		orgID, workerID, endDate)
+	return err
+}
+
+// Event is a lifecycle event summary for the profile timeline.
+type Event struct {
+	ID            uuid.UUID `json:"id"`
+	Type          string    `json:"type"`
+	EffectiveDate time.Time `json:"effective_date"`
+	Reason        string    `json:"reason"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// ListEvents returns a worker's lifecycle events, newest first.
+func (s *Store) ListEvents(ctx context.Context, orgID, workerID uuid.UUID) ([]Event, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, type, effective_date, reason, created_at
+		FROM lifecycle_events
+		WHERE org_id=$1 AND worker_id=$2
+		ORDER BY effective_date DESC, created_at DESC`, orgID, workerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.Type, &e.EffectiveDate, &e.Reason, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// Profile is a worker enriched with their current assignment context.
+type Profile struct {
+	Worker
+	PositionTitle  *string    `json:"position_title,omitempty"`
+	DepartmentName *string    `json:"department_name,omitempty"`
+	LocationName   *string    `json:"location_name,omitempty"`
+	ManagerID      *uuid.UUID `json:"manager_id,omitempty"`
+	ManagerName    *string    `json:"manager_name,omitempty"`
+}
+
+// GetProfile returns a worker plus their current (open primary) position,
+// department, location, and manager — the data behind the profile page.
+func (s *Store) GetProfile(ctx context.Context, orgID, id uuid.UUID) (Profile, error) {
+	var p Profile
+	err := s.pool.QueryRow(ctx, `
+		SELECT `+prefixed("w", workerCols)+`,
+			pos.title, dept.name, loc.name, a.manager_id,
+			CASE WHEN mgr.id IS NULL THEN NULL
+			     ELSE mgr.first_name || ' ' || mgr.last_name END
+		FROM workers w
+		LEFT JOIN worker_assignments a
+			ON a.worker_id = w.id AND a.end_date IS NULL AND a.is_primary
+		LEFT JOIN positions pos   ON pos.id = a.position_id
+		LEFT JOIN departments dept ON dept.id = pos.department_id
+		LEFT JOIN locations loc   ON loc.id = pos.location_id
+		LEFT JOIN workers mgr     ON mgr.id = a.manager_id
+		WHERE w.org_id = $1 AND w.id = $2`, orgID, id).
+		Scan(&p.ID, &p.OrgID, &p.EmployeeNumber, &p.FirstName, &p.LastName,
+			&p.PreferredName, &p.WorkEmail, &p.PersonalEmail, &p.Phone,
+			&p.DateOfBirth, &p.HireDate, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+			&p.PositionTitle, &p.DepartmentName, &p.LocationName, &p.ManagerID, &p.ManagerName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Profile{}, ErrNotFound
+	}
+	return p, err
 }

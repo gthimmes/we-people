@@ -22,10 +22,16 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
 // Routes mounts worker routes under an authenticated router.
 func (h *Handler) Routes(r chi.Router) {
-	r.With(auth.RequirePermission("worker:read")).Get("/", h.list)
-	r.With(auth.RequirePermission("worker:read")).Get("/{id}", h.get)
-	r.With(auth.RequirePermission("worker:write")).Post("/", h.create)
-	r.With(auth.RequirePermission("worker:write")).Put("/{id}", h.update)
+	read := auth.RequirePermission("worker:read")
+	write := auth.RequirePermission("worker:write")
+
+	r.With(read).Get("/", h.list)
+	r.With(read).Get("/{id}", h.get)
+	r.With(read).Get("/{id}/profile", h.profile)
+	r.With(read).Get("/{id}/events", h.events)
+	r.With(write).Post("/", h.create)
+	r.With(write).Put("/{id}", h.update)
+	r.With(write).Post("/{id}/terminate", h.terminate)
 }
 
 type workerRequest struct {
@@ -159,6 +165,81 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not update worker")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) profile(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid worker id")
+		return
+	}
+	prof, err := h.svc.Profile(r.Context(), p.OrgID, id)
+	if errors.Is(err, ErrNotFound) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "worker not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not fetch profile")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, prof)
+}
+
+func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid worker id")
+		return
+	}
+	events, err := h.svc.Events(r.Context(), p.OrgID, id)
+	if errors.Is(err, ErrNotFound) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "worker not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not fetch events")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": events})
+}
+
+type terminateRequest struct {
+	EffectiveDate *string `json:"effective_date"`
+	Reason        string  `json:"reason"`
+}
+
+func (h *Handler) terminate(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid worker id")
+		return
+	}
+	var req terminateRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	eff, effErr := parseDate(req.EffectiveDate)
+	if effErr != nil {
+		httpx.ValidationError(w, map[string]string{"effective_date": "must be YYYY-MM-DD"})
+		return
+	}
+	var effTime time.Time
+	if eff != nil {
+		effTime = *eff
+	}
+	updated, err := h.svc.Terminate(r.Context(), p.OrgID, p.UserID, id, effTime, req.Reason)
+	if errors.Is(err, ErrNotFound) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "worker not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not terminate worker")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, updated)

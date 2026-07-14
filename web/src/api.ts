@@ -112,3 +112,56 @@ export interface ListResponse<T> {
   data: T[];
   meta: { total: number; limit: number; offset: number };
 }
+
+export interface Profile extends Worker {
+  personal_email: string;
+  date_of_birth?: string;
+  position_title?: string;
+  department_name?: string;
+  location_name?: string;
+  manager_id?: string;
+  manager_name?: string;
+}
+
+export interface LifecycleEvent {
+  id: string;
+  type: string;
+  effective_date: string;
+  reason: string;
+  created_at: string;
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  code: string;
+  parent_id?: string;
+  cost_center: string;
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  city: string;
+  region: string;
+  country: string;
+  timezone: string;
+}
+
+export interface Position {
+  id: string;
+  title: string;
+  department_id?: string;
+  location_id?: string;
+  status: string;
+  fte: number;
+}
+
+export interface Assignment {
+  id: string;
+  worker_id: string;
+  position_id?: string;
+  manager_id?: string;
+  effective_date: string;
+  is_primary: boolean;
+}

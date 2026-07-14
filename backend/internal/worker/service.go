@@ -152,3 +152,70 @@ func (s *Service) Update(ctx context.Context, orgID, actorUserID, id uuid.UUID, 
 	})
 	return updated, nil
 }
+
+// Terminate ends a worker's employment: it flips their status to terminated,
+// closes any open assignments, and records a termination lifecycle event — all
+// in one transaction.
+func (s *Service) Terminate(ctx context.Context, orgID, actorUserID, id uuid.UUID, effectiveDate time.Time, reason string) (Worker, error) {
+	before, err := s.store.GetByID(ctx, orgID, id)
+	if err != nil {
+		return Worker{}, err
+	}
+	if before.Status == "terminated" {
+		return before, nil // already terminated; no-op
+	}
+	if effectiveDate.IsZero() {
+		effectiveDate = time.Now()
+	}
+
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return Worker{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := s.store.SetStatusTx(ctx, tx, orgID, id, "terminated"); err != nil {
+		return Worker{}, err
+	}
+	if err := s.store.CloseOpenAssignmentsTx(ctx, tx, orgID, id, effectiveDate); err != nil {
+		return Worker{}, err
+	}
+	if err := s.store.LifecycleEvent(ctx, tx, orgID, id, "termination", effectiveDate, reason, &actorUserID); err != nil {
+		return Worker{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Worker{}, err
+	}
+
+	after, err := s.store.GetByID(ctx, orgID, id)
+	if err != nil {
+		return Worker{}, err
+	}
+	s.audit.Record(ctx, audit.Entry{
+		OrgID: orgID, ActorUserID: &actorUserID,
+		Action: "worker.terminate", EntityType: "worker", EntityID: &id,
+		Before: before, After: after,
+	})
+	return after, nil
+}
+
+// Events returns a worker's lifecycle timeline (non-nil slice).
+func (s *Service) Events(ctx context.Context, orgID, id uuid.UUID) ([]Event, error) {
+	// Ensure the worker exists in this org before returning its events.
+	if _, err := s.store.GetByID(ctx, orgID, id); err != nil {
+		return nil, err
+	}
+	events, err := s.store.ListEvents(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if events == nil {
+		events = []Event{}
+	}
+	return events, nil
+}
+
+// Profile returns a worker enriched with their current assignment context.
+func (s *Service) Profile(ctx context.Context, orgID, id uuid.UUID) (Profile, error) {
+	return s.store.GetProfile(ctx, orgID, id)
+}

@@ -150,6 +150,82 @@ func TestRegisterLoginAndWorkerFlow(t *testing.T) {
 	}
 }
 
+func TestWorkerLifecycle(t *testing.T) {
+	srv := testServer(t)
+
+	// Register a fresh org.
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Lifecycle Co %d", time.Now().UnixNano()),
+		"email":    "hr@lifecycle.co",
+		"password": "password123",
+	}, &reg); s != http.StatusCreated {
+		t.Fatalf("register status = %d", s)
+	}
+	access := reg.Token.AccessToken
+
+	// Hire a worker.
+	var wk struct {
+		ID string `json:"id"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/workers", access, map[string]any{
+		"employee_number": "L-001", "first_name": "Lee", "last_name": "Cycle",
+		"hire_date": "2024-05-01",
+	}, &wk); s != http.StatusCreated {
+		t.Fatalf("create worker status = %d", s)
+	}
+
+	// Profile reflects the worker (no assignment yet, so no title).
+	var prof struct {
+		Status        string  `json:"status"`
+		PositionTitle *string `json:"position_title"`
+	}
+	if s := getJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/profile", access, &prof); s != http.StatusOK {
+		t.Fatalf("profile status = %d", s)
+	}
+	if prof.Status != "active" {
+		t.Errorf("profile status = %q, want active", prof.Status)
+	}
+
+	// Hire event exists.
+	var events struct {
+		Data []struct {
+			Type string `json:"type"`
+		} `json:"data"`
+	}
+	if s := getJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/events", access, &events); s != http.StatusOK {
+		t.Fatalf("events status = %d", s)
+	}
+	if len(events.Data) != 1 || events.Data[0].Type != "hire" {
+		t.Errorf("expected one hire event, got %+v", events.Data)
+	}
+
+	// Terminate.
+	var termed struct {
+		Status string `json:"status"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/terminate", access, map[string]any{
+		"effective_date": "2025-01-31", "reason": "test",
+	}, &termed); s != http.StatusOK {
+		t.Fatalf("terminate status = %d", s)
+	}
+	if termed.Status != "terminated" {
+		t.Errorf("status after terminate = %q, want terminated", termed.Status)
+	}
+
+	// Now two events, newest (termination) first.
+	if s := getJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/events", access, &events); s != http.StatusOK {
+		t.Fatalf("events status = %d", s)
+	}
+	if len(events.Data) != 2 || events.Data[0].Type != "termination" {
+		t.Errorf("expected termination then hire, got %+v", events.Data)
+	}
+}
+
 // --- helpers ---
 
 func postJSON(t *testing.T, url, token string, body any, out any) int {
