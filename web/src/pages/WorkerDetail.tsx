@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   api,
   ApiError,
@@ -13,6 +13,7 @@ import {
   Worker,
 } from "../api";
 import { useAuth } from "../auth";
+import { DeleteButton } from "../components/CrudPanel";
 
 const eventLabels: Record<string, string> = {
   hire: "Hired",
@@ -25,6 +26,7 @@ const eventLabels: Record<string, string> = {
 
 export default function WorkerDetail() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const { me } = useAuth();
   const canWrite = me?.permissions.includes("worker:write");
   const canAssign = me?.permissions.includes("orgstructure:write");
@@ -75,10 +77,18 @@ export default function WorkerDetail() {
           <p className="muted mono">{profile.employee_number}</p>
         </div>
         <div className="header-actions">
-          {canWrite && profile.status !== "terminated" && (
+          {canWrite && (
             <>
-              <button onClick={() => setEditing((e) => !e)}>{editing ? "Cancel" : "Edit"}</button>
-              <TerminateButton id={id} onDone={reload} />
+              {profile.status !== "terminated" && (
+                <>
+                  <button onClick={() => setEditing((e) => !e)}>{editing ? "Cancel" : "Edit"}</button>
+                  <TerminateButton id={id} onDone={reload} />
+                </>
+              )}
+              <DeleteButton
+                label="Delete"
+                onDelete={async () => { await api.del(`/workers/${id}`); navigate("/directory"); }}
+              />
             </>
           )}
         </div>
@@ -353,56 +363,90 @@ function ContactsSection({
   onChange: () => void;
 }) {
   const [show, setShow] = useState(false);
-  const [f, setF] = useState({ name: "", relationship: "", phone: "", email: "" });
-
-  async function add(e: FormEvent) {
-    e.preventDefault();
-    await api.post(`/workers/${workerId}/emergency-contacts`, f);
-    setF({ name: "", relationship: "", phone: "", email: "" });
-    setShow(false);
-    onChange();
-  }
-  async function remove(cid: string) {
-    await api.del(`/workers/${workerId}/emergency-contacts/${cid}`);
-    onChange();
-  }
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   return (
     <section className="card">
       <div className="panel-head">
         <h3>Emergency contacts</h3>
-        {canWrite && <button className="small-btn" onClick={() => setShow((s) => !s)}>{show ? "Cancel" : "+ Add"}</button>}
+        {canWrite && <button className="small-btn" onClick={() => { setShow((s) => !s); setEditingId(null); }}>{show ? "Cancel" : "+ Add"}</button>}
       </div>
       {show && (
-        <form className="stack panel-form" onSubmit={add}>
-          <div className="two-col">
-            <label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
-            <label>Relationship<input value={f.relationship} onChange={(e) => setF({ ...f, relationship: e.target.value })} /></label>
-          </div>
-          <div className="two-col">
-            <label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
-            <label>Email<input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
-          </div>
-          <button className="primary">Save contact</button>
-        </form>
+        <ContactForm
+          onSubmit={async (body) => { await api.post(`/workers/${workerId}/emergency-contacts`, body); setShow(false); onChange(); }}
+          onCancel={() => setShow(false)}
+        />
       )}
       {contacts.length === 0 ? (
         <p className="muted">No emergency contacts.</p>
       ) : (
         <ul className="list">
-          {contacts.map((c) => (
-            <li key={c.id}>
-              <span>
-                <strong>{c.name}</strong>
-                {c.relationship && <span className="muted"> · {c.relationship}</span>}
-                <div className="muted small">{[c.phone, c.email].filter(Boolean).join(" · ")}</div>
-              </span>
-              {canWrite && <button className="small-btn danger" onClick={() => remove(c.id)}>Remove</button>}
-            </li>
-          ))}
+          {contacts.map((c) =>
+            editingId === c.id ? (
+              <li key={c.id} className="crud-editing">
+                <ContactForm
+                  initial={c}
+                  onSubmit={async (body) => { await api.put(`/workers/${workerId}/emergency-contacts/${c.id}`, body); setEditingId(null); onChange(); }}
+                  onCancel={() => setEditingId(null)}
+                />
+              </li>
+            ) : (
+              <li key={c.id}>
+                <span>
+                  <strong>{c.name}</strong>
+                  {c.relationship && <span className="muted"> · {c.relationship}</span>}
+                  <div className="muted small">{[c.phone, c.email].filter(Boolean).join(" · ")}</div>
+                </span>
+                {canWrite && (
+                  <span className="row-actions">
+                    <button className="small-btn" onClick={() => { setEditingId(c.id); setShow(false); }}>Edit</button>
+                    <DeleteButton label="Remove" onDelete={async () => { await api.del(`/workers/${workerId}/emergency-contacts/${c.id}`); onChange(); }} />
+                  </span>
+                )}
+              </li>
+            )
+          )}
         </ul>
       )}
     </section>
+  );
+}
+
+function ContactForm({ initial, onSubmit, onCancel }: { initial?: EmergencyContact; onSubmit: (b: Record<string, string>) => Promise<void>; onCancel: () => void }) {
+  const [f, setF] = useState({
+    name: initial?.name ?? "",
+    relationship: initial?.relationship ?? "",
+    phone: initial?.phone ?? "",
+    email: initial?.email ?? "",
+  });
+  const [err, setErr] = useState("");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setErr("");
+    try {
+      await onSubmit(f);
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : "Failed");
+    }
+  }
+
+  return (
+    <form className="stack panel-form" onSubmit={submit}>
+      <div className="two-col">
+        <label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
+        <label>Relationship<input value={f.relationship} onChange={(e) => setF({ ...f, relationship: e.target.value })} /></label>
+      </div>
+      <div className="two-col">
+        <label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
+        <label>Email<input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
+      </div>
+      {err && <div className="error">{err}</div>}
+      <div className="inline-form">
+        <button className="primary">Save contact</button>
+        <button type="button" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
   );
 }
 

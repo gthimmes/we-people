@@ -32,9 +32,30 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(read).Get("/{id}/emergency-contacts", h.listContacts)
 	r.With(write).Post("/", h.create)
 	r.With(write).Put("/{id}", h.update)
+	r.With(write).Delete("/{id}", h.deleteWorker)
 	r.With(write).Post("/{id}/terminate", h.terminate)
 	r.With(write).Post("/{id}/emergency-contacts", h.addContact)
+	r.With(write).Put("/{id}/emergency-contacts/{contactId}", h.updateContact)
 	r.With(write).Delete("/{id}/emergency-contacts/{contactId}", h.deleteContact)
+}
+
+func (h *Handler) deleteWorker(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid worker id")
+		return
+	}
+	err = h.svc.Delete(r.Context(), p.OrgID, p.UserID, id)
+	if errors.Is(err, ErrNotFound) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "worker not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not delete worker")
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 type workerRequest struct {

@@ -87,6 +87,104 @@ func (s *Service) ListPositions(ctx context.Context, orgID uuid.UUID) ([]Positio
 	return p, err
 }
 
+// UpdateDepartment edits a department.
+func (s *Service) UpdateDepartment(ctx context.Context, orgID, actor, id uuid.UUID, name, code string, parentID *uuid.UUID, costCenter string) (Department, error) {
+	if parentID != nil && *parentID == id {
+		return Department{}, ErrSelfParent
+	}
+	d, err := s.store.UpdateDepartment(ctx, Department{ID: id, OrgID: orgID, Name: name, Code: code, ParentID: parentID, CostCenter: costCenter})
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "department.update", EntityType: "department", EntityID: &id, After: d})
+	}
+	return d, err
+}
+
+// DeleteDepartment removes a department.
+func (s *Service) DeleteDepartment(ctx context.Context, orgID, actor, id uuid.UUID) error {
+	return s.deleteAndAudit(ctx, orgID, actor, id, "department", s.store.DeleteDepartment)
+}
+
+// UpdateLocation edits a location.
+func (s *Service) UpdateLocation(ctx context.Context, orgID, actor uuid.UUID, l Location) (Location, error) {
+	l.OrgID = orgID
+	if l.Timezone == "" {
+		l.Timezone = "UTC"
+	}
+	updated, err := s.store.UpdateLocation(ctx, l)
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "location.update", EntityType: "location", EntityID: &l.ID, After: updated})
+	}
+	return updated, err
+}
+
+// DeleteLocation removes a location.
+func (s *Service) DeleteLocation(ctx context.Context, orgID, actor, id uuid.UUID) error {
+	return s.deleteAndAudit(ctx, orgID, actor, id, "location", s.store.DeleteLocation)
+}
+
+// UpdatePosition edits a position.
+func (s *Service) UpdatePosition(ctx context.Context, orgID, actor uuid.UUID, p Position) (Position, error) {
+	p.OrgID = orgID
+	if p.Status == "" {
+		p.Status = "open"
+	}
+	if p.FTE == 0 {
+		p.FTE = 1.0
+	}
+	updated, err := s.store.UpdatePosition(ctx, p)
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "position.update", EntityType: "position", EntityID: &p.ID, After: updated})
+	}
+	return updated, err
+}
+
+// DeletePosition removes a position.
+func (s *Service) DeletePosition(ctx context.Context, orgID, actor, id uuid.UUID) error {
+	return s.deleteAndAudit(ctx, orgID, actor, id, "position", s.store.DeletePosition)
+}
+
+// UpdateLegalEntity edits a legal entity.
+func (s *Service) UpdateLegalEntity(ctx context.Context, orgID, actor uuid.UUID, e LegalEntity) (LegalEntity, error) {
+	e.OrgID = orgID
+	updated, err := s.store.UpdateLegalEntity(ctx, e)
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "legal_entity.update", EntityType: "legal_entity", EntityID: &e.ID, After: updated})
+	}
+	return updated, err
+}
+
+// DeleteLegalEntity removes a legal entity.
+func (s *Service) DeleteLegalEntity(ctx context.Context, orgID, actor, id uuid.UUID) error {
+	return s.deleteAndAudit(ctx, orgID, actor, id, "legal_entity", s.store.DeleteLegalEntity)
+}
+
+// UpdateJobProfile edits a job profile.
+func (s *Service) UpdateJobProfile(ctx context.Context, orgID, actor uuid.UUID, j JobProfile) (JobProfile, error) {
+	j.OrgID = orgID
+	if j.FLSAStatus == "" {
+		j.FLSAStatus = "exempt"
+	}
+	updated, err := s.store.UpdateJobProfile(ctx, j)
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "job_profile.update", EntityType: "job_profile", EntityID: &j.ID, After: updated})
+	}
+	return updated, err
+}
+
+// DeleteJobProfile removes a job profile.
+func (s *Service) DeleteJobProfile(ctx context.Context, orgID, actor, id uuid.UUID) error {
+	return s.deleteAndAudit(ctx, orgID, actor, id, "job_profile", s.store.DeleteJobProfile)
+}
+
+// deleteAndAudit runs a delete function and records an audit entry on success.
+func (s *Service) deleteAndAudit(ctx context.Context, orgID, actor, id uuid.UUID, entity string, del func(context.Context, uuid.UUID, uuid.UUID) error) error {
+	if err := del(ctx, orgID, id); err != nil {
+		return err
+	}
+	s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: entity + ".delete", EntityType: entity, EntityID: &id})
+	return nil
+}
+
 // CreateLegalEntity creates a legal entity.
 func (s *Service) CreateLegalEntity(ctx context.Context, orgID, actor uuid.UUID, e LegalEntity) (LegalEntity, error) {
 	e.OrgID = orgID

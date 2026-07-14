@@ -22,11 +22,92 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 // Routes mounts time-off routes. Any authenticated user may request their own
 // time off and read their own balances/requests.
 func (h *Handler) Routes(r chi.Router) {
+	admin := auth.RequirePermission("org:write")
 	r.Get("/leave-types", h.listLeaveTypes)
-	r.With(auth.RequirePermission("org:write")).Post("/leave-types", h.createLeaveType)
+	r.With(admin).Post("/leave-types", h.createLeaveType)
+	r.With(admin).Put("/leave-types/{id}", h.updateLeaveType)
+	r.With(admin).Delete("/leave-types/{id}", h.deleteLeaveType)
 	r.Get("/balances", h.balances)     // ?worker_id= (defaults to caller)
 	r.Get("/requests", h.listRequests) // ?worker_id= (defaults to caller)
 	r.Post("/requests", h.createRequest)
+	r.Delete("/requests/{id}", h.cancelRequest) // withdraw a pending request
+}
+
+func (h *Handler) updateLeaveType(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid leave type id")
+		return
+	}
+	var req leaveTypeRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		httpx.ValidationError(w, map[string]string{"name": "name is required"})
+		return
+	}
+	isPaid := true
+	if req.IsPaid != nil {
+		isPaid = *req.IsPaid
+	}
+	lt, err := h.svc.UpdateLeaveType(r.Context(), p.OrgID, id, req.Name, isPaid)
+	if errors.Is(err, ErrNotFound) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "leave type not found")
+		return
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "SQLSTATE 23505") {
+			httpx.Error(w, http.StatusConflict, "duplicate", "a leave type with that name already exists")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not update leave type")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, lt)
+}
+
+func (h *Handler) deleteLeaveType(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid leave type id")
+		return
+	}
+	err = h.svc.DeleteLeaveType(r.Context(), p.OrgID, id)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpx.Error(w, http.StatusNotFound, "not_found", "leave type not found")
+	case err != nil && strings.Contains(err.Error(), "SQLSTATE 23503"):
+		httpx.Error(w, http.StatusConflict, "in_use", "this leave type is used by existing requests and cannot be deleted")
+	case err != nil:
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not delete leave type")
+	default:
+		httpx.JSON(w, http.StatusNoContent, nil)
+	}
+}
+
+func (h *Handler) cancelRequest(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid request id")
+		return
+	}
+	err = h.svc.Cancel(r.Context(), p.OrgID, p.UserID, id, p.Can("org:write"))
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpx.Error(w, http.StatusNotFound, "not_found", "request not found")
+	case errors.Is(err, ErrNotOwner):
+		httpx.Error(w, http.StatusForbidden, "forbidden", "you can only cancel your own requests")
+	case errors.Is(err, ErrNotCancellable):
+		httpx.Error(w, http.StatusConflict, "not_cancellable", "only pending requests can be cancelled")
+	case err != nil:
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not cancel request")
+	default:
+		httpx.JSON(w, http.StatusNoContent, nil)
+	}
 }
 
 type leaveTypeRequest struct {

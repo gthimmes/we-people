@@ -187,6 +187,20 @@ func (s *Store) Update(ctx context.Context, wk Worker) (Worker, error) {
 	return updated, err
 }
 
+// Delete permanently removes a worker. Dependent rows (assignments, events,
+// contacts, documents, time-off) cascade; users linked to the worker are
+// detached (FK is ON DELETE SET NULL).
+func (s *Store) Delete(ctx context.Context, orgID, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM workers WHERE org_id=$1 AND id=$2`, orgID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // LifecycleEvent records an employment event.
 func (s *Store) LifecycleEvent(ctx context.Context, tx pgx.Tx, orgID, workerID uuid.UUID, eventType string, effectiveDate time.Time, reason string, createdBy *uuid.UUID) error {
 	_, err := tx.Exec(ctx, `

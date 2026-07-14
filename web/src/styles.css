@@ -407,6 +407,18 @@ button.small-btn {
 .list li:last-child {
   border-bottom: none;
 }
+.list li.crud-editing {
+  display: block;
+}
+.row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.error.small {
+  font-size: 12px;
+}
 
 /* Timeline */
 .timeline {

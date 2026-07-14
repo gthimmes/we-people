@@ -127,6 +127,14 @@ func (s *Store) AdvanceRequestTx(ctx context.Context, tx pgx.Tx, requestID uuid.
 	return err
 }
 
+// CancelRequestTx marks a still-pending request cancelled within a transaction.
+func (s *Store) CancelRequestTx(ctx context.Context, tx pgx.Tx, orgID, id uuid.UUID) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE approval_requests SET status='cancelled', decided_at=now()
+		WHERE org_id=$1 AND id=$2 AND status='pending'`, orgID, id)
+	return err
+}
+
 // FinalizeRequestTx sets a terminal status and decided_at.
 func (s *Store) FinalizeRequestTx(ctx context.Context, tx pgx.Tx, requestID uuid.UUID, status string) error {
 	_, err := tx.Exec(ctx, `UPDATE approval_requests SET status=$2, decided_at=now() WHERE id=$1`, requestID, status)

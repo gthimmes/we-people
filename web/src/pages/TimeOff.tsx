@@ -9,6 +9,8 @@ import {
   TimeOffRequest,
   Worker,
 } from "../api";
+import { useAuth } from "../auth";
+import CrudPanel, { DeleteButton } from "../components/CrudPanel";
 
 // An approval enriched with the underlying time-off details for display.
 interface InboxItem {
@@ -18,6 +20,8 @@ interface InboxItem {
 }
 
 export default function TimeOff() {
+  const { me } = useAuth();
+  const isAdmin = !!me?.permissions.includes("org:write");
   const [types, setTypes] = useState<LeaveType[]>([]);
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [requests, setRequests] = useState<TimeOffRequest[]>([]);
@@ -159,7 +163,7 @@ export default function TimeOff() {
             <div className="card no-pad">
               <table>
                 <thead>
-                  <tr><th>Type</th><th>Dates</th><th>Hours</th><th>Reason</th><th>Status</th></tr>
+                  <tr><th>Type</th><th>Dates</th><th>Hours</th><th>Reason</th><th>Status</th><th></th></tr>
                 </thead>
                 <tbody>
                   {requests.map((r) => (
@@ -169,6 +173,14 @@ export default function TimeOff() {
                       <td>{r.hours}</td>
                       <td className="muted">{r.reason || "—"}</td>
                       <td><span className={`badge badge-${statusClass(r.status)}`}>{r.status}</span></td>
+                      <td>
+                        {r.status === "pending" && (
+                          <DeleteButton
+                            label="Cancel"
+                            onDelete={async () => { await api.del(`/time-off/requests/${r.id}`); await reloadAll(); }}
+                          />
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -176,6 +188,22 @@ export default function TimeOff() {
             </div>
           )}
         </section>
+      )}
+
+      {isAdmin && (
+        <CrudPanel<LeaveType>
+          title="Leave types (admin)"
+          canWrite
+          fields={[{ key: "name", label: "Name", required: true }]}
+          items={types}
+          idOf={(t) => t.id}
+          toForm={(t) => ({ name: t.name })}
+          summary={(t) => <strong>{t.name}</strong>}
+          create={(b) => api.post("/time-off/leave-types", b)}
+          update={(id, b) => api.put(`/time-off/leave-types/${id}`, b)}
+          remove={(id) => api.del(`/time-off/leave-types/${id}`)}
+          onChange={reloadAll}
+        />
       )}
     </div>
   );

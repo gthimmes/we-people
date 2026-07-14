@@ -26,14 +26,24 @@ func (h *Handler) Routes(r chi.Router) {
 
 	r.With(read).Get("/departments", h.listDepartments)
 	r.With(write).Post("/departments", h.createDepartment)
+	r.With(write).Put("/departments/{id}", h.updateDepartment)
+	r.With(write).Delete("/departments/{id}", h.deleteDepartment)
 	r.With(read).Get("/locations", h.listLocations)
 	r.With(write).Post("/locations", h.createLocation)
+	r.With(write).Put("/locations/{id}", h.updateLocation)
+	r.With(write).Delete("/locations/{id}", h.deleteLocation)
 	r.With(read).Get("/legal-entities", h.listLegalEntities)
 	r.With(write).Post("/legal-entities", h.createLegalEntity)
+	r.With(write).Put("/legal-entities/{id}", h.updateLegalEntity)
+	r.With(write).Delete("/legal-entities/{id}", h.deleteLegalEntity)
 	r.With(read).Get("/job-profiles", h.listJobProfiles)
 	r.With(write).Post("/job-profiles", h.createJobProfile)
+	r.With(write).Put("/job-profiles/{id}", h.updateJobProfile)
+	r.With(write).Delete("/job-profiles/{id}", h.deleteJobProfile)
 	r.With(read).Get("/positions", h.listPositions)
 	r.With(write).Post("/positions", h.createPosition)
+	r.With(write).Put("/positions/{id}", h.updatePosition)
+	r.With(write).Delete("/positions/{id}", h.deletePosition)
 	r.With(write).Post("/assignments", h.createAssignment)
 	r.With(read).Get("/assignments", h.listAssignments)      // ?worker_id=
 	r.With(read).Get("/assignments/as-of", h.assignmentAsOf) // ?worker_id=&as_of=
@@ -155,6 +165,245 @@ func (h *Handler) assignmentAsOf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, a)
+}
+
+// parseID parses the {id} URL param, writing a 400 and returning ok=false on
+// failure.
+func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_id", "invalid id")
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// writeMutationError maps common update/delete errors to responses: not-found,
+// unique-violation (409), and foreign-key-in-use (409).
+func writeMutationError(w http.ResponseWriter, err error, msg string) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpx.Error(w, http.StatusNotFound, "not_found", "not found")
+	case errors.Is(err, ErrSelfParent):
+		httpx.ValidationError(w, map[string]string{"parent_id": ErrSelfParent.Error()})
+	case err != nil && strings.Contains(err.Error(), "SQLSTATE 23505"):
+		httpx.Error(w, http.StatusConflict, "duplicate", "a record with that name already exists")
+	case err != nil && strings.Contains(err.Error(), "SQLSTATE 23503"):
+		httpx.Error(w, http.StatusConflict, "in_use", "this record is still referenced and cannot be deleted")
+	default:
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", msg)
+	}
+}
+
+func (h *Handler) updateDepartment(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	var req departmentRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		httpx.ValidationError(w, map[string]string{"name": "name is required"})
+		return
+	}
+	parentID, ok := optionalUUID(w, req.ParentID)
+	if !ok {
+		return
+	}
+	d, err := h.svc.UpdateDepartment(r.Context(), p.OrgID, p.UserID, id, req.Name, req.Code, parentID, req.CostCenter)
+	if err != nil {
+		writeMutationError(w, err, "could not update department")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, d)
+}
+
+func (h *Handler) deleteDepartment(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteDepartment(r.Context(), p.OrgID, p.UserID, id); err != nil {
+		writeMutationError(w, err, "could not delete department")
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) updateLocation(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	var req locationRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		httpx.ValidationError(w, map[string]string{"name": "name is required"})
+		return
+	}
+	l, err := h.svc.UpdateLocation(r.Context(), p.OrgID, p.UserID, Location{
+		ID: id, Name: req.Name, Address: req.Address, City: req.City,
+		Region: req.Region, Country: req.Country, Timezone: req.Timezone,
+	})
+	if err != nil {
+		writeMutationError(w, err, "could not update location")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, l)
+}
+
+func (h *Handler) deleteLocation(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteLocation(r.Context(), p.OrgID, p.UserID, id); err != nil {
+		writeMutationError(w, err, "could not delete location")
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) updateLegalEntity(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	var req legalEntityRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		httpx.ValidationError(w, map[string]string{"name": "name is required"})
+		return
+	}
+	e, err := h.svc.UpdateLegalEntity(r.Context(), p.OrgID, p.UserID, LegalEntity{
+		ID: id, Name: req.Name, Country: req.Country, TaxID: req.TaxID,
+	})
+	if err != nil {
+		writeMutationError(w, err, "could not update legal entity")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, e)
+}
+
+func (h *Handler) deleteLegalEntity(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteLegalEntity(r.Context(), p.OrgID, p.UserID, id); err != nil {
+		writeMutationError(w, err, "could not delete legal entity")
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) updateJobProfile(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	var req jobProfileRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		httpx.ValidationError(w, map[string]string{"title": "title is required"})
+		return
+	}
+	if req.FLSAStatus != "" && req.FLSAStatus != "exempt" && req.FLSAStatus != "non_exempt" {
+		httpx.ValidationError(w, map[string]string{"flsa_status": "must be exempt or non_exempt"})
+		return
+	}
+	j, err := h.svc.UpdateJobProfile(r.Context(), p.OrgID, p.UserID, JobProfile{
+		ID: id, Title: req.Title, JobFamily: req.JobFamily, Level: req.Level, FLSAStatus: req.FLSAStatus,
+	})
+	if err != nil {
+		writeMutationError(w, err, "could not update job profile")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, j)
+}
+
+func (h *Handler) deleteJobProfile(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteJobProfile(r.Context(), p.OrgID, p.UserID, id); err != nil {
+		writeMutationError(w, err, "could not delete job profile")
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
+}
+
+func (h *Handler) updatePosition(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	var req positionRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		httpx.ValidationError(w, map[string]string{"title": "title is required"})
+		return
+	}
+	deptID, ok := optionalUUID(w, req.DepartmentID)
+	if !ok {
+		return
+	}
+	locID, ok := optionalUUID(w, req.LocationID)
+	if !ok {
+		return
+	}
+	jobID, ok := optionalUUID(w, req.JobProfileID)
+	if !ok {
+		return
+	}
+	entityID, ok := optionalUUID(w, req.LegalEntityID)
+	if !ok {
+		return
+	}
+	pos := Position{ID: id, Title: req.Title, DepartmentID: deptID, LocationID: locID,
+		JobProfileID: jobID, LegalEntityID: entityID, Status: req.Status}
+	if req.FTE != nil {
+		pos.FTE = *req.FTE
+	}
+	updated, err := h.svc.UpdatePosition(r.Context(), p.OrgID, p.UserID, pos)
+	if err != nil {
+		writeMutationError(w, err, "could not update position")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) deletePosition(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeletePosition(r.Context(), p.OrgID, p.UserID, id); err != nil {
+		writeMutationError(w, err, "could not delete position")
+		return
+	}
+	httpx.JSON(w, http.StatusNoContent, nil)
 }
 
 type departmentRequest struct {

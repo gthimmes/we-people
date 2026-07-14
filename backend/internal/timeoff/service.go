@@ -17,6 +17,8 @@ import (
 var (
 	ErrInvalidLeaveType = errors.New("invalid leave type")
 	ErrNoWorker         = errors.New("no worker linked to this user; specify worker_id")
+	ErrNotCancellable   = errors.New("only pending requests can be cancelled")
+	ErrNotOwner         = errors.New("you can only cancel your own requests")
 )
 
 // Service implements time-off business logic and acts as the approvals
@@ -157,6 +159,60 @@ func (s *Service) ListForWorker(ctx context.Context, orgID, workerID uuid.UUID) 
 // EnsureLeaveType creates a leave type (used by seeding/admin).
 func (s *Service) EnsureLeaveType(ctx context.Context, orgID uuid.UUID, name string, isPaid bool) (LeaveType, error) {
 	return s.store.CreateLeaveType(ctx, orgID, name, isPaid)
+}
+
+// UpdateLeaveType edits a leave type.
+func (s *Service) UpdateLeaveType(ctx context.Context, orgID, id uuid.UUID, name string, isPaid bool) (LeaveType, error) {
+	return s.store.UpdateLeaveType(ctx, orgID, id, name, isPaid)
+}
+
+// DeleteLeaveType removes a leave type.
+func (s *Service) DeleteLeaveType(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.store.DeleteLeaveType(ctx, orgID, id)
+}
+
+// Cancel withdraws a pending time-off request and cancels its approval so it
+// leaves the approver's inbox. The caller must own the request (or be an admin).
+func (s *Service) Cancel(ctx context.Context, orgID, actorUserID, requestID uuid.UUID, adminOverride bool) error {
+	callerWorker, err := s.store.WorkerIDForUser(ctx, orgID, actorUserID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	req, err := s.store.GetBySubjectTx(ctx, tx, requestID)
+	if err != nil {
+		return err
+	}
+	if req.OrgID != orgID {
+		return ErrNotFound
+	}
+	if !adminOverride && (callerWorker == nil || *callerWorker != req.WorkerID) {
+		return ErrNotOwner
+	}
+	if req.Status != "pending" {
+		return ErrNotCancellable
+	}
+	if err := s.store.SetStatusTx(ctx, tx, req.ID, "cancelled"); err != nil {
+		return err
+	}
+	if req.ApprovalRequestID != nil {
+		if err := s.approvals.CancelTx(ctx, tx, orgID, *req.ApprovalRequestID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.audit.Record(ctx, audit.Entry{
+		OrgID: orgID, ActorUserID: &actorUserID,
+		Action: "time_off.cancel", EntityType: "time_off_request", EntityID: &req.ID,
+	})
+	return nil
 }
 
 // GrantBalance adds hours to a worker's balance for a leave type (seeding/admin).

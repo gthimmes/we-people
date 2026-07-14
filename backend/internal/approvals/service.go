@@ -143,6 +143,12 @@ func (s *Service) Decide(ctx context.Context, orgID, actorUserID uuid.UUID, requ
 	return req, nil
 }
 
+// CancelTx cancels a pending approval request within a caller's transaction.
+// Used by a consumer when the underlying subject is withdrawn.
+func (s *Service) CancelTx(ctx context.Context, tx pgx.Tx, orgID, requestID uuid.UUID) error {
+	return s.store.CancelRequestTx(ctx, tx, orgID, requestID)
+}
+
 // finalize dispatches to the registered consumer effect for the request type.
 func (s *Service) finalize(ctx context.Context, tx pgx.Tx, req Request) error {
 	f, ok := s.finalizers[req.RequestType]

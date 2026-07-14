@@ -85,6 +85,31 @@ func (s *Store) ListLeaveTypes(ctx context.Context, orgID uuid.UUID) ([]LeaveTyp
 	return out, rows.Err()
 }
 
+// UpdateLeaveType edits a leave type in the org.
+func (s *Store) UpdateLeaveType(ctx context.Context, orgID, id uuid.UUID, name string, isPaid bool) (LeaveType, error) {
+	var lt LeaveType
+	err := s.pool.QueryRow(ctx, `
+		UPDATE leave_types SET name=$3, is_paid=$4 WHERE org_id=$1 AND id=$2
+		RETURNING id, org_id, name, is_paid`, orgID, id, name, isPaid).
+		Scan(&lt.ID, &lt.OrgID, &lt.Name, &lt.IsPaid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeaveType{}, ErrNotFound
+	}
+	return lt, err
+}
+
+// DeleteLeaveType removes a leave type. Fails (FK) if requests reference it.
+func (s *Store) DeleteLeaveType(ctx context.Context, orgID, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM leave_types WHERE org_id=$1 AND id=$2`, orgID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetLeaveType returns a leave type by id in the org.
 func (s *Store) GetLeaveType(ctx context.Context, orgID, id uuid.UUID) (LeaveType, error) {
 	var lt LeaveType

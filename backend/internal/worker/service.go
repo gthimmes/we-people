@@ -238,6 +238,22 @@ func (s *Service) Terminate(ctx context.Context, orgID, actorUserID, id uuid.UUI
 	return after, nil
 }
 
+// Delete permanently removes a worker and audit-logs the removal.
+func (s *Service) Delete(ctx context.Context, orgID, actorUserID, id uuid.UUID) error {
+	before, err := s.store.GetByID(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Delete(ctx, orgID, id); err != nil {
+		return err
+	}
+	s.audit.Record(ctx, audit.Entry{
+		OrgID: orgID, ActorUserID: &actorUserID,
+		Action: "worker.delete", EntityType: "worker", EntityID: &id, Before: before,
+	})
+	return nil
+}
+
 // Events returns a worker's lifecycle timeline (non-nil slice).
 func (s *Service) Events(ctx context.Context, orgID, id uuid.UUID) ([]Event, error) {
 	// Ensure the worker exists in this org before returning its events.

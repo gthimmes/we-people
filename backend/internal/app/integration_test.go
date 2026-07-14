@@ -475,6 +475,82 @@ func TestTimeOffApprovalFlow(t *testing.T) {
 	}
 }
 
+func TestEntityEditAndDelete(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("CRUD Co %d", time.Now().UnixNano()),
+		"email":    "admin@crud.co", "password": "password123",
+	}, &reg)
+	tok := reg.Token.AccessToken
+
+	// Department: create -> update -> delete -> 404.
+	var dept struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/departments", tok, map[string]any{"name": "Ops", "code": "OPS"}, &dept)
+	var updated struct {
+		Name string `json:"name"`
+	}
+	if s := putJSON(t, srv.URL+"/api/v1/departments/"+dept.ID, tok, map[string]any{"name": "Operations", "code": "OPS"}, &updated); s != http.StatusOK {
+		t.Fatalf("update department = %d", s)
+	}
+	if updated.Name != "Operations" {
+		t.Errorf("department name = %q, want Operations", updated.Name)
+	}
+	if s := deleteReq(t, srv.URL+"/api/v1/departments/"+dept.ID, tok); s != http.StatusNoContent {
+		t.Fatalf("delete department = %d", s)
+	}
+	if s := deleteReq(t, srv.URL+"/api/v1/departments/"+dept.ID, tok); s != http.StatusNotFound {
+		t.Errorf("re-delete department = %d, want 404", s)
+	}
+
+	// Leave type in use cannot be deleted (409), unused one can (204).
+	var lt struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/time-off/leave-types", tok, map[string]any{"name": "Vacation"}, &lt)
+	var wk struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", tok, map[string]any{"employee_number": "C-1", "first_name": "C", "last_name": "One"}, &wk)
+	postJSON(t, srv.URL+"/api/v1/time-off/requests", tok, map[string]any{
+		"worker_id": wk.ID, "leave_type_id": lt.ID,
+		"start_date": "2026-08-01", "end_date": "2026-08-01", "hours": 8,
+	}, nil)
+	if s := deleteReq(t, srv.URL+"/api/v1/time-off/leave-types/"+lt.ID, tok); s != http.StatusConflict {
+		t.Errorf("delete in-use leave type = %d, want 409", s)
+	}
+
+	var unused struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/time-off/leave-types", tok, map[string]any{"name": "Jury Duty"}, &unused)
+	if s := deleteReq(t, srv.URL+"/api/v1/time-off/leave-types/"+unused.ID, tok); s != http.StatusNoContent {
+		t.Errorf("delete unused leave type = %d, want 204", s)
+	}
+
+	// Worker delete.
+	if s := deleteReq(t, srv.URL+"/api/v1/workers/"+wk.ID, tok); s != http.StatusNoContent {
+		t.Errorf("delete worker = %d, want 204", s)
+	}
+	if s := getJSON(t, srv.URL+"/api/v1/workers/"+wk.ID, tok, nil); s != http.StatusNotFound {
+		t.Errorf("get deleted worker = %d, want 404", s)
+	}
+}
+
+func deleteReq(t *testing.T, url, token string) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodDelete, url, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	return do(t, req, nil)
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)

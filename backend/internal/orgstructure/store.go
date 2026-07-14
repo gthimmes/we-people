@@ -12,8 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when an entity does not exist in the org.
-var ErrNotFound = errors.New("not found")
+// Errors returned by the store/service.
+var (
+	// ErrNotFound is returned when an entity does not exist in the org.
+	ErrNotFound = errors.New("not found")
+	// ErrSelfParent is returned when a department is made its own parent.
+	ErrSelfParent = errors.New("a department cannot be its own parent")
+)
 
 // Department is an organizational unit; departments form a tree via ParentID.
 type Department struct {
@@ -200,6 +205,44 @@ func (s *Store) ListPositions(ctx context.Context, orgID uuid.UUID) ([]Position,
 	return out, rows.Err()
 }
 
+// UpdateDepartment edits a department in the org.
+func (s *Store) UpdateDepartment(ctx context.Context, d Department) (Department, error) {
+	updated, err := scanDepartment(s.pool.QueryRow(ctx, `
+		UPDATE departments SET name=$3, code=$4, parent_id=$5, cost_center=$6, updated_at=now()
+		WHERE org_id=$1 AND id=$2
+		RETURNING id, org_id, name, code, parent_id, cost_center, created_at`,
+		d.OrgID, d.ID, d.Name, d.Code, d.ParentID, d.CostCenter))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Department{}, ErrNotFound
+	}
+	return updated, err
+}
+
+// DeleteDepartment removes a department. Positions referencing it are detached
+// (FK is ON DELETE SET NULL).
+func (s *Store) DeleteDepartment(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.deleteRow(ctx, "departments", orgID, id)
+}
+
+func scanDepartment(row pgx.Row) (Department, error) {
+	var d Department
+	err := row.Scan(&d.ID, &d.OrgID, &d.Name, &d.Code, &d.ParentID, &d.CostCenter, &d.CreatedAt)
+	return d, err
+}
+
+// deleteRow deletes an org-scoped row from a table by id, returning ErrNotFound
+// when nothing matched. The table name is a trusted constant, never user input.
+func (s *Store) deleteRow(ctx context.Context, table string, orgID, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM `+table+` WHERE org_id=$1 AND id=$2`, orgID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // --- Legal entities ---
 
 // CreateLegalEntity inserts a legal entity.
@@ -233,6 +276,25 @@ func (s *Store) ListLegalEntities(ctx context.Context, orgID uuid.UUID) ([]Legal
 	return out, rows.Err()
 }
 
+// UpdateLegalEntity edits a legal entity in the org.
+func (s *Store) UpdateLegalEntity(ctx context.Context, e LegalEntity) (LegalEntity, error) {
+	err := s.pool.QueryRow(ctx, `
+		UPDATE legal_entities SET name=$3, country=$4, tax_id=$5
+		WHERE org_id=$1 AND id=$2
+		RETURNING id, org_id, name, country, tax_id, created_at`,
+		e.OrgID, e.ID, e.Name, e.Country, e.TaxID).
+		Scan(&e.ID, &e.OrgID, &e.Name, &e.Country, &e.TaxID, &e.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LegalEntity{}, ErrNotFound
+	}
+	return e, err
+}
+
+// DeleteLegalEntity removes a legal entity (positions detach via SET NULL).
+func (s *Store) DeleteLegalEntity(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.deleteRow(ctx, "legal_entities", orgID, id)
+}
+
 // --- Job profiles ---
 
 // CreateJobProfile inserts a job profile.
@@ -264,6 +326,44 @@ func (s *Store) ListJobProfiles(ctx context.Context, orgID uuid.UUID) ([]JobProf
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// UpdateLocation edits a location in the org.
+func (s *Store) UpdateLocation(ctx context.Context, l Location) (Location, error) {
+	err := s.pool.QueryRow(ctx, `
+		UPDATE locations SET name=$3, address=$4, city=$5, region=$6, country=$7, timezone=$8, updated_at=now()
+		WHERE org_id=$1 AND id=$2
+		RETURNING id, org_id, name, address, city, region, country, timezone, created_at`,
+		l.OrgID, l.ID, l.Name, l.Address, l.City, l.Region, l.Country, l.Timezone).
+		Scan(&l.ID, &l.OrgID, &l.Name, &l.Address, &l.City, &l.Region, &l.Country, &l.Timezone, &l.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Location{}, ErrNotFound
+	}
+	return l, err
+}
+
+// DeleteLocation removes a location (positions detach via SET NULL).
+func (s *Store) DeleteLocation(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.deleteRow(ctx, "locations", orgID, id)
+}
+
+// UpdatePosition edits a position in the org.
+func (s *Store) UpdatePosition(ctx context.Context, p Position) (Position, error) {
+	updated, err := scanPosition(s.pool.QueryRow(ctx, `
+		UPDATE positions SET title=$3, department_id=$4, location_id=$5, job_profile_id=$6,
+			legal_entity_id=$7, status=$8, fte=$9, updated_at=now()
+		WHERE org_id=$1 AND id=$2
+		RETURNING `+positionCols,
+		p.OrgID, p.ID, p.Title, p.DepartmentID, p.LocationID, p.JobProfileID, p.LegalEntityID, p.Status, p.FTE))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Position{}, ErrNotFound
+	}
+	return updated, err
+}
+
+// DeletePosition removes a position (assignments detach via SET NULL).
+func (s *Store) DeletePosition(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.deleteRow(ctx, "positions", orgID, id)
 }
 
 // SetPositionStatusTx updates a position's status within a transaction.
@@ -303,6 +403,25 @@ func (s *Store) CreateAssignmentTx(ctx context.Context, tx pgx.Tx, a Assignment)
 		a.OrgID, a.WorkerID, a.PositionID, a.ManagerID, a.EffectiveDate, a.EndDate, a.IsPrimary).
 		Scan(&a.ID, &a.OrgID, &a.WorkerID, &a.PositionID, &a.ManagerID, &a.EffectiveDate, &a.EndDate, &a.IsPrimary)
 	return a, err
+}
+
+// UpdateJobProfile edits a job profile in the org.
+func (s *Store) UpdateJobProfile(ctx context.Context, j JobProfile) (JobProfile, error) {
+	err := s.pool.QueryRow(ctx, `
+		UPDATE job_profiles SET title=$3, job_family=$4, level=$5, flsa_status=$6
+		WHERE org_id=$1 AND id=$2
+		RETURNING id, org_id, title, job_family, level, flsa_status, created_at`,
+		j.OrgID, j.ID, j.Title, j.JobFamily, j.Level, j.FLSAStatus).
+		Scan(&j.ID, &j.OrgID, &j.Title, &j.JobFamily, &j.Level, &j.FLSAStatus, &j.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return JobProfile{}, ErrNotFound
+	}
+	return j, err
+}
+
+// DeleteJobProfile removes a job profile (positions detach via SET NULL).
+func (s *Store) DeleteJobProfile(ctx context.Context, orgID, id uuid.UUID) error {
+	return s.deleteRow(ctx, "job_profiles", orgID, id)
 }
 
 const assignmentCols = `id, org_id, worker_id, position_id, manager_id, effective_date, end_date, is_primary`
