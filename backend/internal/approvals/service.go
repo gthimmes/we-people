@@ -24,10 +24,16 @@ type Finalizer interface {
 	OnApprovalFinalized(ctx context.Context, tx pgx.Tx, req Request) error
 }
 
+// Notifier delivers a notification to the user linked to a worker (best-effort).
+type Notifier interface {
+	NotifyWorker(ctx context.Context, orgID, workerID uuid.UUID, typ, title, body, link string)
+}
+
 // Service runs the approval engine.
 type Service struct {
 	store      *Store
 	audit      *audit.Logger
+	notifier   Notifier
 	finalizers map[string]Finalizer
 }
 
@@ -35,6 +41,9 @@ type Service struct {
 func NewService(store *Store, auditLog *audit.Logger) *Service {
 	return &Service{store: store, audit: auditLog, finalizers: map[string]Finalizer{}}
 }
+
+// SetNotifier wires the notification sink (optional; nil disables notifications).
+func (s *Service) SetNotifier(n Notifier) { s.notifier = n }
 
 // RegisterFinalizer wires a consumer's effect handler for a request type. Called
 // once at startup, after both services are constructed (breaks the cycle).
@@ -140,6 +149,11 @@ func (s *Service) Decide(ctx context.Context, orgID, actorUserID uuid.UUID, requ
 		Action: "approval.decide", EntityType: "approval_request", EntityID: &req.ID,
 		After: map[string]any{"status": req.Status, "approve": approve},
 	})
+	// Notify the requester of the outcome once the decision is committed.
+	if s.notifier != nil && req.RequesterWorkerID != nil && (req.Status == "approved" || req.Status == "rejected") {
+		title := "Your request was " + req.Status
+		s.notifier.NotifyWorker(ctx, orgID, *req.RequesterWorkerID, "approval.decided", title, note, "/time-off")
+	}
 	return req, nil
 }
 

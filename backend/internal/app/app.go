@@ -10,10 +10,12 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/audit"
 	"github.com/gthimmes/we-people/backend/internal/auth"
 	"github.com/gthimmes/we-people/backend/internal/config"
+	"github.com/gthimmes/we-people/backend/internal/dashboard"
 	"github.com/gthimmes/we-people/backend/internal/database"
 	"github.com/gthimmes/we-people/backend/internal/documents"
 	"github.com/gthimmes/we-people/backend/internal/httpx"
 	"github.com/gthimmes/we-people/backend/internal/iam"
+	"github.com/gthimmes/we-people/backend/internal/notifications"
 	"github.com/gthimmes/we-people/backend/internal/org"
 	"github.com/gthimmes/we-people/backend/internal/orgstructure"
 	"github.com/gthimmes/we-people/backend/internal/timeoff"
@@ -41,8 +43,11 @@ func New(db *database.DB, cfg config.Config) *App {
 	docStore := documents.NewStore(pool)
 	approvalStore := approvals.NewStore(pool)
 	timeoffStore := timeoff.NewStore(pool)
+	notifStore := notifications.NewStore(pool)
+	dashStore := dashboard.NewStore(pool)
 
 	// Services
+	notifSvc := notifications.NewService(notifStore)
 	iamSvc := iam.NewService(iamStore, orgStore, tokens)
 	workerSvc := worker.NewService(workerStore, auditLog)
 	structSvc := orgstructure.NewService(structStore, auditLog)
@@ -51,6 +56,9 @@ func New(db *database.DB, cfg config.Config) *App {
 	timeoffSvc := timeoff.NewService(timeoffStore, approvalSvc, auditLog)
 	// Break the approvals<->timeoff cycle: register the consumer's effect handler.
 	approvalSvc.RegisterFinalizer(timeoff.RequestType, timeoffSvc)
+	// Wire notifications into the workflow so approvals aren't silent.
+	approvalSvc.SetNotifier(notifSvc)
+	timeoffSvc.SetNotifier(notifSvc)
 
 	// Handlers
 	iamHandler := iam.NewHandler(iamSvc)
@@ -59,6 +67,8 @@ func New(db *database.DB, cfg config.Config) *App {
 	docHandler := documents.NewHandler(docSvc)
 	approvalHandler := approvals.NewHandler(approvalSvc)
 	timeoffHandler := timeoff.NewHandler(timeoffSvc)
+	notifHandler := notifications.NewHandler(notifSvc)
+	dashHandler := dashboard.NewHandler(dashStore)
 
 	// Auth middleware (loads permissions from the IAM store)
 	authMW := auth.NewMiddleware(tokens, iamStore)
@@ -85,6 +95,9 @@ func New(db *database.DB, cfg config.Config) *App {
 			r.Route("/documents", docHandler.Routes)
 			r.Route("/approvals", approvalHandler.Routes)
 			r.Route("/time-off", timeoffHandler.Routes)
+			r.Route("/notifications", notifHandler.Routes)
+			r.Route("/dashboard", dashHandler.Routes)
+			r.Group(iamHandler.AdminRoutes)
 			r.Group(structHandler.Routes)
 		})
 	})

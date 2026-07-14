@@ -20,6 +20,7 @@ var (
 	ErrUserDisabled       = errors.New("user is disabled")
 	ErrTokenInvalid       = errors.New("refresh token invalid or expired")
 	ErrSlugTaken          = errors.New("organization slug already taken")
+	ErrEmailTaken         = errors.New("a user with that email already exists")
 )
 
 // Service implements registration and authentication.
@@ -140,6 +141,77 @@ func (s *Service) CreateWorkerUser(ctx context.Context, orgID, workerID uuid.UUI
 		return User{}, err
 	}
 	return user, nil
+}
+
+// InviteUser creates a login (optionally linked to a worker) with an initial
+// password and role assignments. Email delivery of the invite is layered later;
+// for now the admin communicates the initial password.
+func (s *Service) InviteUser(ctx context.Context, orgID uuid.UUID, email, password string, workerID *uuid.UUID, roleIDs []uuid.UUID) (User, error) {
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var user User
+	if workerID != nil {
+		user, err = s.store.CreateWorkerUserTx(ctx, tx, orgID, *workerID, email, hash)
+	} else {
+		user, err = s.store.CreateUserTx(ctx, tx, orgID, email, hash)
+	}
+	if err != nil {
+		if isUniqueViolation(err) {
+			return User{}, ErrEmailTaken
+		}
+		return User{}, err
+	}
+	if err := s.store.SetUserRolesTx(ctx, tx, orgID, user.ID, roleIDs); err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+
+// SetUserRoles replaces a user's roles.
+func (s *Service) SetUserRoles(ctx context.Context, orgID, userID uuid.UUID, roleIDs []uuid.UUID) error {
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := s.store.SetUserRolesTx(ctx, tx, orgID, userID, roleIDs); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// SetUserStatus enables or disables a user.
+func (s *Service) SetUserStatus(ctx context.Context, orgID, userID uuid.UUID, status string) error {
+	return s.store.SetUserStatus(ctx, orgID, userID, status)
+}
+
+// ListUsers returns all users in the org (non-nil slice).
+func (s *Service) ListUsers(ctx context.Context, orgID uuid.UUID) ([]UserSummary, error) {
+	u, err := s.store.ListUsers(ctx, orgID)
+	if u == nil {
+		u = []UserSummary{}
+	}
+	return u, err
+}
+
+// ListRoles returns all roles in the org (non-nil slice).
+func (s *Service) ListRoles(ctx context.Context, orgID uuid.UUID) ([]RoleWithPermissions, error) {
+	r, err := s.store.ListRoles(ctx, orgID)
+	if r == nil {
+		r = []RoleWithPermissions{}
+	}
+	return r, err
 }
 
 // Login authenticates a user by org slug + email + password.

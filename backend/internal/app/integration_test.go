@@ -551,6 +551,123 @@ func deleteReq(t *testing.T, url, token string) int {
 	return do(t, req, nil)
 }
 
+func TestNotificationsAndUserManagement(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Organization struct {
+			Slug string `json:"slug"`
+		} `json:"organization"`
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Notify Co %d", time.Now().UnixNano()),
+		"email":    "admin@notify.co", "password": "password123",
+	}, &reg)
+	admin := reg.Token.AccessToken
+	slug := reg.Organization.Slug
+
+	// Two workers: employee reports to manager.
+	var emp, mgr struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "E-1", "first_name": "Ella", "last_name": "Emp"}, &emp)
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "M-1", "first_name": "Manny", "last_name": "Mgr"}, &mgr)
+	postJSON(t, srv.URL+"/api/v1/assignments", admin, map[string]any{"worker_id": emp.ID, "manager_id": mgr.ID, "effective_date": "2024-01-01"}, nil)
+
+	// Roles + invite logins for both, linked to their workers.
+	var rolesResp struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/roles", admin, &rolesResp)
+	var employeeRole string
+	for _, r := range rolesResp.Data {
+		if r.Name == "Employee" {
+			employeeRole = r.ID
+		}
+	}
+	if employeeRole == "" {
+		t.Fatal("no Employee role found")
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/users", admin, map[string]any{
+		"email": "ella@notify.co", "password": "password123", "worker_id": emp.ID, "role_ids": []string{employeeRole},
+	}, nil); s != http.StatusCreated {
+		t.Fatalf("invite employee = %d", s)
+	}
+	postJSON(t, srv.URL+"/api/v1/users", admin, map[string]any{
+		"email": "manny@notify.co", "password": "password123", "worker_id": mgr.ID, "role_ids": []string{employeeRole},
+	}, nil)
+
+	// Duplicate email is rejected.
+	if s := postJSON(t, srv.URL+"/api/v1/users", admin, map[string]any{
+		"email": "ella@notify.co", "password": "password123",
+	}, nil); s != http.StatusConflict {
+		t.Errorf("duplicate invite = %d, want 409", s)
+	}
+
+	login := func(email string) string {
+		var lr struct {
+			Token struct {
+				AccessToken string `json:"access_token"`
+			} `json:"token"`
+		}
+		postJSON(t, srv.URL+"/api/v1/auth/login", "", map[string]any{"slug": slug, "email": email, "password": "password123"}, &lr)
+		return lr.Token.AccessToken
+	}
+	ella := login("ella@notify.co")
+	manny := login("manny@notify.co")
+
+	// Leave type + Ella requests time off -> Manny (manager) is notified.
+	var lt struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/time-off/leave-types", admin, map[string]any{"name": "Vacation"}, &lt)
+	postJSON(t, srv.URL+"/api/v1/time-off/requests", ella, map[string]any{
+		"leave_type_id": lt.ID, "start_date": "2026-08-01", "end_date": "2026-08-02", "hours": 16,
+	}, nil)
+
+	var count struct {
+		Unread int `json:"unread"`
+	}
+	getJSON(t, srv.URL+"/api/v1/notifications/unread-count", manny, &count)
+	if count.Unread != 1 {
+		t.Errorf("manager unread notifications = %d, want 1", count.Unread)
+	}
+
+	// Manny approves -> Ella is notified of the outcome.
+	var inbox struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/approvals", manny, &inbox)
+	if len(inbox.Data) != 1 {
+		t.Fatalf("manager inbox = %d, want 1", len(inbox.Data))
+	}
+	postJSON(t, srv.URL+"/api/v1/approvals/"+inbox.Data[0].ID+"/decide", manny, map[string]any{"approve": true}, nil)
+
+	var ellaNotifs struct {
+		Data []struct {
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/notifications", ella, &ellaNotifs)
+	found := false
+	for _, n := range ellaNotifs.Data {
+		if n.Title == "Your request was approved" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("employee not notified of approval; got %+v", ellaNotifs.Data)
+	}
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)

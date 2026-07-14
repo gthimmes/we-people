@@ -21,18 +21,27 @@ var (
 	ErrNotOwner         = errors.New("you can only cancel your own requests")
 )
 
+// Notifier delivers a notification to the user linked to a worker (best-effort).
+type Notifier interface {
+	NotifyWorker(ctx context.Context, orgID, workerID uuid.UUID, typ, title, body, link string)
+}
+
 // Service implements time-off business logic and acts as the approvals
 // Finalizer for the "time_off" request type.
 type Service struct {
 	store     *Store
 	approvals *approvals.Service
 	audit     *audit.Logger
+	notifier  Notifier
 }
 
 // NewService builds the time-off service.
 func NewService(store *Store, approvalsSvc *approvals.Service, auditLog *audit.Logger) *Service {
 	return &Service{store: store, approvals: approvalsSvc, audit: auditLog}
 }
+
+// SetNotifier wires the notification sink (optional).
+func (s *Service) SetNotifier(n Notifier) { s.notifier = n }
 
 // RequestType is the approvals request type this module owns.
 const RequestType = "time_off"
@@ -104,6 +113,11 @@ func (s *Service) Create(ctx context.Context, orgID, actorUserID uuid.UUID, in C
 	// Reflect any auto-approval that happened during creation.
 	if appReq.Status == "approved" {
 		created.Status = "approved"
+	}
+	// Notify the approving manager that a request awaits them.
+	if s.notifier != nil && manager != nil && appReq.Status == "pending" {
+		s.notifier.NotifyWorker(ctx, orgID, *manager, "approval.assigned",
+			"New time-off request to review", in.Reason, "/time-off")
 	}
 	return created, nil
 }

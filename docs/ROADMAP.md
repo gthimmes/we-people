@@ -8,15 +8,23 @@ Timeframes assume a small focused team; they're relative, not commitments.
 
 ---
 
-### Phase 0 — Foundation *(weeks 0–2)* — **in progress**
+### Phase 0 — Foundation *(weeks 0–2)* — **done**
 The substrate. Nothing user-facing ships without it.
 - [x] Repo, docs, architecture decisions
 - [x] Go backend scaffold, Postgres via Docker, migration runner
-- [ ] Multi-tenant org model + tenant scoping
-- [ ] Auth: register org, login, JWT access/refresh
-- [ ] RBAC: roles, permissions, route guards
-- [ ] Audit log primitive
-- [ ] Frontend scaffold + auth flow
+- [x] Multi-tenant org model + tenant scoping
+- [x] Auth: register org, login, JWT access/refresh
+- [x] RBAC: roles, permissions, route guards
+- [x] Audit log primitive
+- [x] Frontend scaffold + auth flow
+
+### Phase 0.5 — Operational layer *(the "make it usable" tier — see [GAP_ANALYSIS](GAP_ANALYSIS.md))* — **done**
+What turns a system-of-record into something a team runs their week on.
+- [x] **Notifications** — in-app center + unread badge; approval engine wired so
+  approvers are told about requests and requesters about decisions (email later)
+- [x] **User & team management** — invite/link/role/enable-disable users; roles viewer
+- [x] **Home dashboard** — headcount, open positions, awaiting-you, out-today, recent hires
+- [ ] Next: bulk employee import, org settings, profile photos
 
 ### Phase 1 — Core HRIS / System of Record *(weeks 2–8)* — **first module** ⭐
 The spine every other module references.

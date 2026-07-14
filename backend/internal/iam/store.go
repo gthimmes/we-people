@@ -105,7 +105,106 @@ func (s *Store) CreateWorkerUserTx(ctx context.Context, tx pgx.Tx, orgID, worker
 	return u, err
 }
 
+// UserSummary is a user enriched with role names and linked worker name.
+type UserSummary struct {
+	ID         uuid.UUID  `json:"id"`
+	Email      string     `json:"email"`
+	Status     string     `json:"status"`
+	WorkerID   *uuid.UUID `json:"worker_id,omitempty"`
+	WorkerName *string    `json:"worker_name,omitempty"`
+	Roles      []string   `json:"roles"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// ListUsers returns all users in an org with their roles and linked worker.
+func (s *Store) ListUsers(ctx context.Context, orgID uuid.UUID) ([]UserSummary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT u.id, u.email, u.status, u.worker_id,
+			CASE WHEN w.id IS NULL THEN NULL ELSE w.first_name || ' ' || w.last_name END,
+			COALESCE(array_agg(r.name) FILTER (WHERE r.name IS NOT NULL), '{}'),
+			u.created_at
+		FROM users u
+		LEFT JOIN workers w ON w.id = u.worker_id
+		LEFT JOIN user_roles ur ON ur.user_id = u.id
+		LEFT JOIN roles r ON r.id = ur.role_id
+		WHERE u.org_id = $1
+		GROUP BY u.id, w.id
+		ORDER BY u.email`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserSummary
+	for rows.Next() {
+		var u UserSummary
+		if err := rows.Scan(&u.ID, &u.Email, &u.Status, &u.WorkerID, &u.WorkerName, &u.Roles, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// SetUserStatus enables/disables a user in the org.
+func (s *Store) SetUserStatus(ctx context.Context, orgID, id uuid.UUID, status string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE users SET status=$3, updated_at=now() WHERE org_id=$1 AND id=$2`, orgID, id, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetUserRolesTx replaces a user's role assignments within a transaction. Only
+// roles owned by the org are assigned.
+func (s *Store) SetUserRolesTx(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, roleIDs []uuid.UUID) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id=$1`, userID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		SELECT $1, id FROM roles WHERE org_id=$2 AND id = ANY($3::uuid[])`,
+		userID, orgID, roleIDs)
+	return err
+}
+
 // --- Roles & permissions ---
+
+// RoleWithPermissions is a role plus its granted permission keys.
+type RoleWithPermissions struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	IsSystem    bool      `json:"is_system"`
+	Permissions []string  `json:"permissions"`
+}
+
+// ListRoles returns all roles in an org with their permissions.
+func (s *Store) ListRoles(ctx context.Context, orgID uuid.UUID) ([]RoleWithPermissions, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.id, r.name, r.description, r.is_system,
+			COALESCE(array_agg(rp.permission_key) FILTER (WHERE rp.permission_key IS NOT NULL), '{}')
+		FROM roles r
+		LEFT JOIN role_permissions rp ON rp.role_id = r.id
+		WHERE r.org_id = $1
+		GROUP BY r.id
+		ORDER BY r.name`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RoleWithPermissions
+	for rows.Next() {
+		var r RoleWithPermissions
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem, &r.Permissions); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
 
 // GetRoleByName returns a role by name within an org.
 func (s *Store) GetRoleByName(ctx context.Context, orgID uuid.UUID, name string) (Role, error) {

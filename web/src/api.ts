@@ -283,3 +283,40 @@ export interface Approval {
   status: string;
   created_at: string;
 }
+
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  link: string;
+  read_at?: string;
+  created_at: string;
+}
+
+export interface UserSummary {
+  id: string;
+  email: string;
+  status: string;
+  worker_id?: string;
+  worker_name?: string;
+  roles: string[];
+  created_at: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  is_system: boolean;
+  permissions: string[];
+}
+
+export interface DashboardSummary {
+  headcount: number;
+  open_positions: number;
+  departments: number;
+  on_leave: number;
+  out_today: { worker_id: string; name: string; leave_type: string; end_date: string }[];
+  recent_hires: { worker_id: string; name: string; hire_date?: string; title?: string }[];
+}
