@@ -37,11 +37,16 @@ type Worker struct {
 	PostalCode   string `json:"postal_code"`
 	Country      string `json:"country"`
 	// Demographics (EEO)
-	Gender        string    `json:"gender"`
-	Ethnicity     string    `json:"ethnicity"`
-	MaritalStatus string    `json:"marital_status"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Gender        string `json:"gender"`
+	Ethnicity     string `json:"ethnicity"`
+	MaritalStatus string `json:"marital_status"`
+	// Work eligibility / I-9
+	WorkAuthType   string     `json:"work_auth_type"`
+	WorkAuthExpiry *time.Time `json:"work_auth_expiry,omitempty"`
+	I9Verified     bool       `json:"i9_verified"`
+	I9VerifiedOn   *time.Time `json:"i9_verified_on,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // Store provides data access for workers, scoped by org.
@@ -56,7 +61,9 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 const workerCols = `id, org_id, employee_number, first_name, last_name, preferred_name,
 	work_email, personal_email, phone, date_of_birth, hire_date, status,
 	address_line1, address_line2, city, region, postal_code, country,
-	gender, ethnicity, marital_status, created_at, updated_at`
+	gender, ethnicity, marital_status,
+	work_auth_type, work_auth_expiry, i9_verified, i9_verified_on,
+	created_at, updated_at`
 
 // prefixed rewrites a comma-separated column list so each column carries the
 // given table alias, e.g. prefixed("w", "id, name") -> "w.id, w.name".
@@ -74,7 +81,9 @@ func scanWorker(row pgx.Row) (Worker, error) {
 		&wk.PreferredName, &wk.WorkEmail, &wk.PersonalEmail, &wk.Phone,
 		&wk.DateOfBirth, &wk.HireDate, &wk.Status,
 		&wk.AddressLine1, &wk.AddressLine2, &wk.City, &wk.Region, &wk.PostalCode, &wk.Country,
-		&wk.Gender, &wk.Ethnicity, &wk.MaritalStatus, &wk.CreatedAt, &wk.UpdatedAt)
+		&wk.Gender, &wk.Ethnicity, &wk.MaritalStatus,
+		&wk.WorkAuthType, &wk.WorkAuthExpiry, &wk.I9Verified, &wk.I9VerifiedOn,
+		&wk.CreatedAt, &wk.UpdatedAt)
 	return wk, err
 }
 
@@ -84,13 +93,15 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, wk Worker) (Worker, error
 		INSERT INTO workers (org_id, employee_number, first_name, last_name, preferred_name,
 			work_email, personal_email, phone, date_of_birth, hire_date, status,
 			address_line1, address_line2, city, region, postal_code, country,
-			gender, ethnicity, marital_status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+			gender, ethnicity, marital_status,
+			work_auth_type, work_auth_expiry, i9_verified, i9_verified_on)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
 		RETURNING `+workerCols,
 		wk.OrgID, wk.EmployeeNumber, wk.FirstName, wk.LastName, wk.PreferredName,
 		wk.WorkEmail, wk.PersonalEmail, wk.Phone, wk.DateOfBirth, wk.HireDate, wk.Status,
 		wk.AddressLine1, wk.AddressLine2, wk.City, wk.Region, wk.PostalCode, wk.Country,
-		wk.Gender, wk.Ethnicity, wk.MaritalStatus))
+		wk.Gender, wk.Ethnicity, wk.MaritalStatus,
+		wk.WorkAuthType, wk.WorkAuthExpiry, wk.I9Verified, wk.I9VerifiedOn))
 }
 
 // GetByID returns a worker by id, scoped to the org.
@@ -160,13 +171,16 @@ func (s *Store) Update(ctx context.Context, wk Worker) (Worker, error) {
 			date_of_birth = $9, hire_date = $10, status = $11,
 			address_line1 = $12, address_line2 = $13, city = $14, region = $15,
 			postal_code = $16, country = $17,
-			gender = $18, ethnicity = $19, marital_status = $20, updated_at = now()
+			gender = $18, ethnicity = $19, marital_status = $20,
+			work_auth_type = $21, work_auth_expiry = $22, i9_verified = $23, i9_verified_on = $24,
+			updated_at = now()
 		WHERE org_id = $1 AND id = $2
 		RETURNING `+workerCols,
 		wk.OrgID, wk.ID, wk.FirstName, wk.LastName, wk.PreferredName,
 		wk.WorkEmail, wk.PersonalEmail, wk.Phone, wk.DateOfBirth, wk.HireDate, wk.Status,
 		wk.AddressLine1, wk.AddressLine2, wk.City, wk.Region, wk.PostalCode, wk.Country,
-		wk.Gender, wk.Ethnicity, wk.MaritalStatus))
+		wk.Gender, wk.Ethnicity, wk.MaritalStatus,
+		wk.WorkAuthType, wk.WorkAuthExpiry, wk.I9Verified, wk.I9VerifiedOn))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Worker{}, ErrNotFound
 	}
@@ -263,7 +277,9 @@ func (s *Store) GetProfile(ctx context.Context, orgID, id uuid.UUID) (Profile, e
 			&p.PreferredName, &p.WorkEmail, &p.PersonalEmail, &p.Phone,
 			&p.DateOfBirth, &p.HireDate, &p.Status,
 			&p.AddressLine1, &p.AddressLine2, &p.City, &p.Region, &p.PostalCode, &p.Country,
-			&p.Gender, &p.Ethnicity, &p.MaritalStatus, &p.CreatedAt, &p.UpdatedAt,
+			&p.Gender, &p.Ethnicity, &p.MaritalStatus,
+			&p.WorkAuthType, &p.WorkAuthExpiry, &p.I9Verified, &p.I9VerifiedOn,
+			&p.CreatedAt, &p.UpdatedAt,
 			&p.PositionTitle, &p.DepartmentName, &p.LocationName, &p.ManagerID, &p.ManagerName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Profile{}, ErrNotFound

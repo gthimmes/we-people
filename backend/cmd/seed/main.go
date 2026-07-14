@@ -105,9 +105,11 @@ func run() error {
 	jordan := hire("E-005", "Jordan", "Kim", "jordan@acme.test")
 	alex := hire("E-006", "Alex", "Rivera", "alex@acme.test")
 
-	// Assignments (build the reporting hierarchy)
+	// Assignments (build the reporting hierarchy), effective at hire so
+	// effective-dated "as of date" queries have meaningful history.
+	hireDate := ptrDate("2023-01-15")
 	assign := func(wk worker.Worker, posID uuid.UUID, mgr *worker.Worker) {
-		in := orgstructure.AssignInput{WorkerID: wk.ID, PositionID: &posID}
+		in := orgstructure.AssignInput{WorkerID: wk.ID, PositionID: &posID, EffectiveDate: *hireDate}
 		if mgr != nil {
 			in.ManagerID = &mgr.ID
 		}

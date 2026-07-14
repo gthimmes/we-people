@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, ApiError, Department, Location, Position } from "../api";
+import { api, ApiError, Department, JobProfile, LegalEntity, Location, Position } from "../api";
 import { useAuth } from "../auth";
 
 export default function OrgManage() {
@@ -8,16 +8,22 @@ export default function OrgManage() {
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [entities, setEntities] = useState<LegalEntity[]>([]);
+  const [jobProfiles, setJobProfiles] = useState<JobProfile[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
 
   async function reload() {
-    const [d, l, p] = await Promise.all([
+    const [d, l, e, j, p] = await Promise.all([
       api.get<{ data: Department[] }>("/departments"),
       api.get<{ data: Location[] }>("/locations"),
+      api.get<{ data: LegalEntity[] }>("/legal-entities"),
+      api.get<{ data: JobProfile[] }>("/job-profiles"),
       api.get<{ data: Position[] }>("/positions"),
     ]);
     setDepartments(d.data);
     setLocations(l.data);
+    setEntities(e.data);
+    setJobProfiles(j.data);
     setPositions(p.data);
   }
 
@@ -78,10 +84,52 @@ export default function OrgManage() {
         </Panel>
       </div>
 
+      <div className="detail-grid">
+        <Panel
+          title="Legal entities"
+          canWrite={canWrite}
+          fields={[
+            { key: "name", label: "Name", required: true },
+            { key: "country", label: "Country" },
+            { key: "tax_id", label: "Tax ID" },
+          ]}
+          create={(body) => api.post("/legal-entities", body)}
+          onCreated={reload}
+        >
+          {entities.map((e) => (
+            <li key={e.id}>
+              <strong>{e.name}</strong>
+              <span className="muted small">{[e.country, e.tax_id].filter(Boolean).join(" · ")}</span>
+            </li>
+          ))}
+        </Panel>
+
+        <Panel
+          title="Job profiles"
+          canWrite={canWrite}
+          fields={[
+            { key: "title", label: "Title", required: true },
+            { key: "job_family", label: "Job family" },
+            { key: "level", label: "Level" },
+          ]}
+          create={(body) => api.post("/job-profiles", body)}
+          onCreated={reload}
+        >
+          {jobProfiles.map((j) => (
+            <li key={j.id}>
+              <strong>{j.title}</strong>
+              <span className="muted small">{[j.level, j.job_family].filter(Boolean).join(" · ")}</span>
+            </li>
+          ))}
+        </Panel>
+      </div>
+
       <PositionPanel
         positions={positions}
         departments={departments}
         locations={locations}
+        jobProfiles={jobProfiles}
+        entities={entities}
         canWrite={canWrite}
         deptName={deptName}
         locName={locName}
@@ -164,6 +212,8 @@ function PositionPanel({
   positions,
   departments,
   locations,
+  jobProfiles,
+  entities,
   canWrite,
   deptName,
   locName,
@@ -172,6 +222,8 @@ function PositionPanel({
   positions: Position[];
   departments: Department[];
   locations: Location[];
+  jobProfiles: JobProfile[];
+  entities: LegalEntity[];
   canWrite?: boolean;
   deptName: (id?: string) => string;
   locName: (id?: string) => string;
@@ -181,6 +233,8 @@ function PositionPanel({
   const [title, setTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [locationId, setLocationId] = useState("");
+  const [jobProfileId, setJobProfileId] = useState("");
+  const [legalEntityId, setLegalEntityId] = useState("");
   const [err, setErr] = useState("");
 
   async function submit(e: FormEvent) {
@@ -191,10 +245,14 @@ function PositionPanel({
         title,
         department_id: departmentId || null,
         location_id: locationId || null,
+        job_profile_id: jobProfileId || null,
+        legal_entity_id: legalEntityId || null,
       });
       setTitle("");
       setDepartmentId("");
       setLocationId("");
+      setJobProfileId("");
+      setLegalEntityId("");
       setShow(false);
       onCreated();
     } catch (e2) {
@@ -228,6 +286,22 @@ function PositionPanel({
               <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
                 <option value="">— none —</option>
                 {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="two-col">
+            <label>
+              Job profile
+              <select value={jobProfileId} onChange={(e) => setJobProfileId(e.target.value)}>
+                <option value="">— none —</option>
+                {jobProfiles.map((j) => <option key={j.id} value={j.id}>{j.title}{j.level ? ` (${j.level})` : ""}</option>)}
+              </select>
+            </label>
+            <label>
+              Legal entity
+              <select value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)}>
+                <option value="">— none —</option>
+                {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
               </select>
             </label>
           </div>

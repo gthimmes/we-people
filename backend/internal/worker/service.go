@@ -24,15 +24,19 @@ func NewService(store *Store, auditLog *audit.Logger) *Service {
 // PersonalFields are the optional address + demographic attributes shared by
 // create and update.
 type PersonalFields struct {
-	AddressLine1  string
-	AddressLine2  string
-	City          string
-	Region        string
-	PostalCode    string
-	Country       string
-	Gender        string
-	Ethnicity     string
-	MaritalStatus string
+	AddressLine1   string
+	AddressLine2   string
+	City           string
+	Region         string
+	PostalCode     string
+	Country        string
+	Gender         string
+	Ethnicity      string
+	MaritalStatus  string
+	WorkAuthType   string
+	WorkAuthExpiry *time.Time
+	I9Verified     bool
+	I9VerifiedOn   *time.Time
 }
 
 // CreateInput is the payload for hiring/creating a worker.
@@ -150,6 +154,10 @@ func applyPersonal(wk *Worker, p PersonalFields) {
 	wk.Gender = p.Gender
 	wk.Ethnicity = p.Ethnicity
 	wk.MaritalStatus = p.MaritalStatus
+	wk.WorkAuthType = p.WorkAuthType
+	wk.WorkAuthExpiry = p.WorkAuthExpiry
+	wk.I9Verified = p.I9Verified
+	wk.I9VerifiedOn = p.I9VerifiedOn
 }
 
 // Update edits a worker and audit-logs the before/after.

@@ -87,6 +87,61 @@ func (s *Service) ListPositions(ctx context.Context, orgID uuid.UUID) ([]Positio
 	return p, err
 }
 
+// CreateLegalEntity creates a legal entity.
+func (s *Service) CreateLegalEntity(ctx context.Context, orgID, actor uuid.UUID, e LegalEntity) (LegalEntity, error) {
+	e.OrgID = orgID
+	created, err := s.store.CreateLegalEntity(ctx, e)
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "legal_entity.create", EntityType: "legal_entity", EntityID: &created.ID, After: created})
+	}
+	return created, err
+}
+
+// ListLegalEntities returns legal entities (non-nil slice).
+func (s *Service) ListLegalEntities(ctx context.Context, orgID uuid.UUID) ([]LegalEntity, error) {
+	e, err := s.store.ListLegalEntities(ctx, orgID)
+	if e == nil {
+		e = []LegalEntity{}
+	}
+	return e, err
+}
+
+// CreateJobProfile creates a job profile.
+func (s *Service) CreateJobProfile(ctx context.Context, orgID, actor uuid.UUID, j JobProfile) (JobProfile, error) {
+	j.OrgID = orgID
+	if j.FLSAStatus == "" {
+		j.FLSAStatus = "exempt"
+	}
+	created, err := s.store.CreateJobProfile(ctx, j)
+	if err == nil {
+		s.audit.Record(ctx, audit.Entry{OrgID: orgID, ActorUserID: &actor, Action: "job_profile.create", EntityType: "job_profile", EntityID: &created.ID, After: created})
+	}
+	return created, err
+}
+
+// ListJobProfiles returns job profiles (non-nil slice).
+func (s *Service) ListJobProfiles(ctx context.Context, orgID uuid.UUID) ([]JobProfile, error) {
+	j, err := s.store.ListJobProfiles(ctx, orgID)
+	if j == nil {
+		j = []JobProfile{}
+	}
+	return j, err
+}
+
+// ListAssignments returns a worker's assignment history (non-nil slice).
+func (s *Service) ListAssignments(ctx context.Context, orgID, workerID uuid.UUID) ([]Assignment, error) {
+	a, err := s.store.ListAssignments(ctx, orgID, workerID)
+	if a == nil {
+		a = []Assignment{}
+	}
+	return a, err
+}
+
+// AssignmentAsOf returns the assignment in effect on a given date.
+func (s *Service) AssignmentAsOf(ctx context.Context, orgID, workerID uuid.UUID, asOf time.Time) (Assignment, error) {
+	return s.store.AssignmentAsOf(ctx, orgID, workerID, asOf)
+}
+
 // AssignInput describes assigning a worker to a position and/or manager.
 // EventType, when set (e.g. "transfer", "promotion"), records a matching
 // lifecycle event so the change shows up on the worker's employment timeline.

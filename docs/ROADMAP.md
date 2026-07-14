@@ -27,7 +27,10 @@ The spine every other module references.
 - [x] Reporting hierarchy + org chart
 - [x] Documents (upload, download, access control)
 - [x] Worker & manager self-service views (profile detail, org chart)
-- [ ] Remaining: legal entities, job profiles, effective-dated "as of date" queries, work eligibility/I-9 data
+- [x] Legal entities, job profiles (positions reference both)
+- [x] Effective-dated "as of date" assignment queries + assignment history
+- [x] Work eligibility / I-9 data on the worker record
+- [ ] Deferred to later phases: department-tree UI, custom fields, GDPR/CCPA data-subject tooling
 
 > **Delivered:** register/login, full worker CRUD + profile detail, address & demographics, emergency contacts, documents (upload/download/delete), departments/locations/positions management, effective-dated assignments with transfer/promote/terminate lifecycle events, and the org chart — all end-to-end with tests.
 

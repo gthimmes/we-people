@@ -316,6 +316,69 @@ func TestPersonalDataContactsAndDocuments(t *testing.T) {
 	}
 }
 
+func TestEffectiveDatedAssignments(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("AsOf Co %d", time.Now().UnixNano()),
+		"email":    "hr@asof.co", "password": "password123",
+	}, &reg)
+	access := reg.Token.AccessToken
+
+	var wk struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", access, map[string]any{
+		"employee_number": "A-001", "first_name": "As", "last_name": "Of",
+	}, &wk)
+
+	// Two positions to move between.
+	var eng, mgr struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/positions", access, map[string]any{"title": "Engineer"}, &eng)
+	postJSON(t, srv.URL+"/api/v1/positions", access, map[string]any{"title": "Manager"}, &mgr)
+
+	// Initial assignment effective 2023-01-01, then a promotion effective 2024-06-01.
+	postJSON(t, srv.URL+"/api/v1/assignments", access, map[string]any{
+		"worker_id": wk.ID, "position_id": eng.ID, "effective_date": "2023-01-01",
+	}, nil)
+	postJSON(t, srv.URL+"/api/v1/assignments", access, map[string]any{
+		"worker_id": wk.ID, "position_id": mgr.ID, "effective_date": "2024-06-01",
+		"event_type": "promotion", "reason": "growth",
+	}, nil)
+
+	// As of 2023-06-01 the worker held the Engineer position…
+	var asEng struct {
+		PositionID string `json:"position_id"`
+	}
+	if s := getJSON(t, srv.URL+"/api/v1/assignments/as-of?worker_id="+wk.ID+"&as_of=2023-06-01", access, &asEng); s != http.StatusOK {
+		t.Fatalf("as-of 2023 status = %d", s)
+	}
+	if asEng.PositionID != eng.ID {
+		t.Errorf("as of 2023-06-01 expected Engineer position, got %s", asEng.PositionID)
+	}
+
+	// …and as of 2024-12-01 the Manager position.
+	var asMgr struct {
+		PositionID string `json:"position_id"`
+	}
+	getJSON(t, srv.URL+"/api/v1/assignments/as-of?worker_id="+wk.ID+"&as_of=2024-12-01", access, &asMgr)
+	if asMgr.PositionID != mgr.ID {
+		t.Errorf("as of 2024-12-01 expected Manager position, got %s", asMgr.PositionID)
+	}
+
+	// Before any assignment: 404.
+	if s := getJSON(t, srv.URL+"/api/v1/assignments/as-of?worker_id="+wk.ID+"&as_of=2020-01-01", access, nil); s != http.StatusNotFound {
+		t.Errorf("as-of before hire = %d, want 404", s)
+	}
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)

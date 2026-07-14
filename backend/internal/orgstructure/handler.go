@@ -1,6 +1,7 @@
 package orgstructure
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -27,10 +28,133 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(write).Post("/departments", h.createDepartment)
 	r.With(read).Get("/locations", h.listLocations)
 	r.With(write).Post("/locations", h.createLocation)
+	r.With(read).Get("/legal-entities", h.listLegalEntities)
+	r.With(write).Post("/legal-entities", h.createLegalEntity)
+	r.With(read).Get("/job-profiles", h.listJobProfiles)
+	r.With(write).Post("/job-profiles", h.createJobProfile)
 	r.With(read).Get("/positions", h.listPositions)
 	r.With(write).Post("/positions", h.createPosition)
 	r.With(write).Post("/assignments", h.createAssignment)
+	r.With(read).Get("/assignments", h.listAssignments)      // ?worker_id=
+	r.With(read).Get("/assignments/as-of", h.assignmentAsOf) // ?worker_id=&as_of=
 	r.With(read).Get("/org-chart", h.orgChart)
+}
+
+type legalEntityRequest struct {
+	Name    string `json:"name"`
+	Country string `json:"country"`
+	TaxID   string `json:"tax_id"`
+}
+
+func (h *Handler) createLegalEntity(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	var req legalEntityRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		httpx.ValidationError(w, map[string]string{"name": "name is required"})
+		return
+	}
+	e, err := h.svc.CreateLegalEntity(r.Context(), p.OrgID, p.UserID, LegalEntity{
+		Name: req.Name, Country: req.Country, TaxID: req.TaxID,
+	})
+	if err != nil {
+		writeConflictOrInternal(w, err, "could not create legal entity")
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, e)
+}
+
+func (h *Handler) listLegalEntities(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	e, err := h.svc.ListLegalEntities(r.Context(), p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list legal entities")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": e})
+}
+
+type jobProfileRequest struct {
+	Title      string `json:"title"`
+	JobFamily  string `json:"job_family"`
+	Level      string `json:"level"`
+	FLSAStatus string `json:"flsa_status"`
+}
+
+func (h *Handler) createJobProfile(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	var req jobProfileRequest
+	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		httpx.ValidationError(w, map[string]string{"title": "title is required"})
+		return
+	}
+	if req.FLSAStatus != "" && req.FLSAStatus != "exempt" && req.FLSAStatus != "non_exempt" {
+		httpx.ValidationError(w, map[string]string{"flsa_status": "must be exempt or non_exempt"})
+		return
+	}
+	j, err := h.svc.CreateJobProfile(r.Context(), p.OrgID, p.UserID, JobProfile{
+		Title: req.Title, JobFamily: req.JobFamily, Level: req.Level, FLSAStatus: req.FLSAStatus,
+	})
+	if err != nil {
+		writeConflictOrInternal(w, err, "could not create job profile")
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, j)
+}
+
+func (h *Handler) listJobProfiles(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	j, err := h.svc.ListJobProfiles(r.Context(), p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list job profiles")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": j})
+}
+
+func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	workerID, err := uuid.Parse(r.URL.Query().Get("worker_id"))
+	if err != nil {
+		httpx.ValidationError(w, map[string]string{"worker_id": "valid worker_id is required"})
+		return
+	}
+	a, err := h.svc.ListAssignments(r.Context(), p.OrgID, workerID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list assignments")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": a})
+}
+
+func (h *Handler) assignmentAsOf(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	q := r.URL.Query()
+	workerID, err := uuid.Parse(q.Get("worker_id"))
+	if err != nil {
+		httpx.ValidationError(w, map[string]string{"worker_id": "valid worker_id is required"})
+		return
+	}
+	asOf, err := time.Parse("2006-01-02", q.Get("as_of"))
+	if err != nil {
+		httpx.ValidationError(w, map[string]string{"as_of": "as_of must be YYYY-MM-DD"})
+		return
+	}
+	a, err := h.svc.AssignmentAsOf(r.Context(), p.OrgID, workerID, asOf)
+	if errors.Is(err, ErrNotFound) {
+		httpx.Error(w, http.StatusNotFound, "not_found", "no assignment in effect on that date")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not resolve assignment")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, a)
 }
 
 type departmentRequest struct {
@@ -113,11 +237,13 @@ func (h *Handler) listLocations(w http.ResponseWriter, r *http.Request) {
 }
 
 type positionRequest struct {
-	Title        string   `json:"title"`
-	DepartmentID *string  `json:"department_id"`
-	LocationID   *string  `json:"location_id"`
-	Status       string   `json:"status"`
-	FTE          *float64 `json:"fte"`
+	Title         string   `json:"title"`
+	DepartmentID  *string  `json:"department_id"`
+	LocationID    *string  `json:"location_id"`
+	JobProfileID  *string  `json:"job_profile_id"`
+	LegalEntityID *string  `json:"legal_entity_id"`
+	Status        string   `json:"status"`
+	FTE           *float64 `json:"fte"`
 }
 
 func (h *Handler) createPosition(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +264,16 @@ func (h *Handler) createPosition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	pos := Position{Title: req.Title, DepartmentID: deptID, LocationID: locID, Status: req.Status}
+	jobID, ok := optionalUUID(w, req.JobProfileID)
+	if !ok {
+		return
+	}
+	entityID, ok := optionalUUID(w, req.LegalEntityID)
+	if !ok {
+		return
+	}
+	pos := Position{Title: req.Title, DepartmentID: deptID, LocationID: locID,
+		JobProfileID: jobID, LegalEntityID: entityID, Status: req.Status}
 	if req.FTE != nil {
 		pos.FTE = *req.FTE
 	}

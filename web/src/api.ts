@@ -135,6 +135,25 @@ export interface Worker {
   gender: string;
   ethnicity: string;
   marital_status: string;
+  work_auth_type: string;
+  work_auth_expiry?: string;
+  i9_verified: boolean;
+  i9_verified_on?: string;
+}
+
+export interface LegalEntity {
+  id: string;
+  name: string;
+  country: string;
+  tax_id: string;
+}
+
+export interface JobProfile {
+  id: string;
+  title: string;
+  job_family: string;
+  level: string;
+  flsa_status: string;
 }
 
 export interface Me {
@@ -215,6 +234,8 @@ export interface Position {
   title: string;
   department_id?: string;
   location_id?: string;
+  job_profile_id?: string;
+  legal_entity_id?: string;
   status: string;
   fte: number;
 }

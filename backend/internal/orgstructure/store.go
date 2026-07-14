@@ -41,14 +41,37 @@ type Location struct {
 
 // Position is a specific seat that may be open, filled, or frozen.
 type Position struct {
-	ID           uuid.UUID  `json:"id"`
-	OrgID        uuid.UUID  `json:"org_id"`
-	Title        string     `json:"title"`
-	DepartmentID *uuid.UUID `json:"department_id,omitempty"`
-	LocationID   *uuid.UUID `json:"location_id,omitempty"`
-	Status       string     `json:"status"`
-	FTE          float64    `json:"fte"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID            uuid.UUID  `json:"id"`
+	OrgID         uuid.UUID  `json:"org_id"`
+	Title         string     `json:"title"`
+	DepartmentID  *uuid.UUID `json:"department_id,omitempty"`
+	LocationID    *uuid.UUID `json:"location_id,omitempty"`
+	JobProfileID  *uuid.UUID `json:"job_profile_id,omitempty"`
+	LegalEntityID *uuid.UUID `json:"legal_entity_id,omitempty"`
+	Status        string     `json:"status"`
+	FTE           float64    `json:"fte"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// LegalEntity is a legal employer (subsidiary/entity) within an organization.
+type LegalEntity struct {
+	ID        uuid.UUID `json:"id"`
+	OrgID     uuid.UUID `json:"org_id"`
+	Name      string    `json:"name"`
+	Country   string    `json:"country"`
+	TaxID     string    `json:"tax_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// JobProfile is a reusable job definition (title, family, level, FLSA).
+type JobProfile struct {
+	ID         uuid.UUID `json:"id"`
+	OrgID      uuid.UUID `json:"org_id"`
+	Title      string    `json:"title"`
+	JobFamily  string    `json:"job_family"`
+	Level      string    `json:"level"`
+	FLSAStatus string    `json:"flsa_status"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Assignment links a worker to a position + manager, effective-dated.
@@ -140,33 +163,105 @@ func (s *Store) ListLocations(ctx context.Context, orgID uuid.UUID) ([]Location,
 
 // --- Positions ---
 
+const positionCols = `id, org_id, title, department_id, location_id, job_profile_id,
+	legal_entity_id, status, fte, created_at`
+
+func scanPosition(row pgx.Row) (Position, error) {
+	var p Position
+	err := row.Scan(&p.ID, &p.OrgID, &p.Title, &p.DepartmentID, &p.LocationID,
+		&p.JobProfileID, &p.LegalEntityID, &p.Status, &p.FTE, &p.CreatedAt)
+	return p, err
+}
+
 // CreatePosition inserts a position.
 func (s *Store) CreatePosition(ctx context.Context, p Position) (Position, error) {
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO positions (org_id, title, department_id, location_id, status, fte)
-		VALUES ($1,$2,$3,$4,$5,$6)
-		RETURNING id, org_id, title, department_id, location_id, status, fte, created_at`,
-		p.OrgID, p.Title, p.DepartmentID, p.LocationID, p.Status, p.FTE).
-		Scan(&p.ID, &p.OrgID, &p.Title, &p.DepartmentID, &p.LocationID, &p.Status, &p.FTE, &p.CreatedAt)
-	return p, err
+	return scanPosition(s.pool.QueryRow(ctx, `
+		INSERT INTO positions (org_id, title, department_id, location_id, job_profile_id, legal_entity_id, status, fte)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		RETURNING `+positionCols,
+		p.OrgID, p.Title, p.DepartmentID, p.LocationID, p.JobProfileID, p.LegalEntityID, p.Status, p.FTE))
 }
 
 // ListPositions returns all positions in an org.
 func (s *Store) ListPositions(ctx context.Context, orgID uuid.UUID) ([]Position, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, org_id, title, department_id, location_id, status, fte, created_at
-		FROM positions WHERE org_id = $1 ORDER BY title`, orgID)
+	rows, err := s.pool.Query(ctx, `SELECT `+positionCols+` FROM positions WHERE org_id = $1 ORDER BY title`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Position
 	for rows.Next() {
-		var p Position
-		if err := rows.Scan(&p.ID, &p.OrgID, &p.Title, &p.DepartmentID, &p.LocationID, &p.Status, &p.FTE, &p.CreatedAt); err != nil {
+		p, err := scanPosition(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// --- Legal entities ---
+
+// CreateLegalEntity inserts a legal entity.
+func (s *Store) CreateLegalEntity(ctx context.Context, e LegalEntity) (LegalEntity, error) {
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO legal_entities (org_id, name, country, tax_id)
+		VALUES ($1,$2,$3,$4)
+		RETURNING id, org_id, name, country, tax_id, created_at`,
+		e.OrgID, e.Name, e.Country, e.TaxID).
+		Scan(&e.ID, &e.OrgID, &e.Name, &e.Country, &e.TaxID, &e.CreatedAt)
+	return e, err
+}
+
+// ListLegalEntities returns all legal entities in an org.
+func (s *Store) ListLegalEntities(ctx context.Context, orgID uuid.UUID) ([]LegalEntity, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, org_id, name, country, tax_id, created_at
+		FROM legal_entities WHERE org_id = $1 ORDER BY name`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LegalEntity
+	for rows.Next() {
+		var e LegalEntity
+		if err := rows.Scan(&e.ID, &e.OrgID, &e.Name, &e.Country, &e.TaxID, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// --- Job profiles ---
+
+// CreateJobProfile inserts a job profile.
+func (s *Store) CreateJobProfile(ctx context.Context, j JobProfile) (JobProfile, error) {
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO job_profiles (org_id, title, job_family, level, flsa_status)
+		VALUES ($1,$2,$3,$4,$5)
+		RETURNING id, org_id, title, job_family, level, flsa_status, created_at`,
+		j.OrgID, j.Title, j.JobFamily, j.Level, j.FLSAStatus).
+		Scan(&j.ID, &j.OrgID, &j.Title, &j.JobFamily, &j.Level, &j.FLSAStatus, &j.CreatedAt)
+	return j, err
+}
+
+// ListJobProfiles returns all job profiles in an org.
+func (s *Store) ListJobProfiles(ctx context.Context, orgID uuid.UUID) ([]JobProfile, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, org_id, title, job_family, level, flsa_status, created_at
+		FROM job_profiles WHERE org_id = $1 ORDER BY title, level`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []JobProfile
+	for rows.Next() {
+		var j JobProfile
+		if err := rows.Scan(&j.ID, &j.OrgID, &j.Title, &j.JobFamily, &j.Level, &j.FLSAStatus, &j.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
 	}
 	return out, rows.Err()
 }
@@ -207,6 +302,51 @@ func (s *Store) CreateAssignmentTx(ctx context.Context, tx pgx.Tx, a Assignment)
 		RETURNING id, org_id, worker_id, position_id, manager_id, effective_date, end_date, is_primary`,
 		a.OrgID, a.WorkerID, a.PositionID, a.ManagerID, a.EffectiveDate, a.EndDate, a.IsPrimary).
 		Scan(&a.ID, &a.OrgID, &a.WorkerID, &a.PositionID, &a.ManagerID, &a.EffectiveDate, &a.EndDate, &a.IsPrimary)
+	return a, err
+}
+
+const assignmentCols = `id, org_id, worker_id, position_id, manager_id, effective_date, end_date, is_primary`
+
+func scanAssignment(row pgx.Row) (Assignment, error) {
+	var a Assignment
+	err := row.Scan(&a.ID, &a.OrgID, &a.WorkerID, &a.PositionID, &a.ManagerID,
+		&a.EffectiveDate, &a.EndDate, &a.IsPrimary)
+	return a, err
+}
+
+// ListAssignments returns a worker's full assignment history, newest first.
+func (s *Store) ListAssignments(ctx context.Context, orgID, workerID uuid.UUID) ([]Assignment, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+assignmentCols+` FROM worker_assignments
+		WHERE org_id = $1 AND worker_id = $2
+		ORDER BY effective_date DESC, created_at DESC`, orgID, workerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Assignment
+	for rows.Next() {
+		a, err := scanAssignment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// AssignmentAsOf returns the primary assignment in effect on a given date —
+// the effective-dated "what was true on date X" query.
+func (s *Store) AssignmentAsOf(ctx context.Context, orgID, workerID uuid.UUID, asOf time.Time) (Assignment, error) {
+	a, err := scanAssignment(s.pool.QueryRow(ctx, `
+		SELECT `+assignmentCols+` FROM worker_assignments
+		WHERE org_id = $1 AND worker_id = $2 AND is_primary
+		  AND effective_date <= $3 AND (end_date IS NULL OR end_date > $3)
+		ORDER BY effective_date DESC
+		LIMIT 1`, orgID, workerID, asOf))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Assignment{}, ErrNotFound
+	}
 	return a, err
 }
 

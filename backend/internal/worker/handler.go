@@ -59,20 +59,32 @@ type workerRequest struct {
 	Gender        string `json:"gender"`
 	Ethnicity     string `json:"ethnicity"`
 	MaritalStatus string `json:"marital_status"`
+	// Work eligibility / I-9
+	WorkAuthType   string  `json:"work_auth_type"`
+	WorkAuthExpiry *string `json:"work_auth_expiry"`
+	I9Verified     bool    `json:"i9_verified"`
+	I9VerifiedOn   *string `json:"i9_verified_on"`
 }
 
-// personal maps request fields to the shared PersonalFields struct.
+// personal maps request fields to the shared PersonalFields struct. Date fields
+// are parsed leniently — invalid dates are treated as unset.
 func (req workerRequest) personal() PersonalFields {
+	authExpiry, _ := parseDate(req.WorkAuthExpiry)
+	i9On, _ := parseDate(req.I9VerifiedOn)
 	return PersonalFields{
-		AddressLine1:  req.AddressLine1,
-		AddressLine2:  req.AddressLine2,
-		City:          req.City,
-		Region:        req.Region,
-		PostalCode:    req.PostalCode,
-		Country:       req.Country,
-		Gender:        req.Gender,
-		Ethnicity:     req.Ethnicity,
-		MaritalStatus: req.MaritalStatus,
+		AddressLine1:   req.AddressLine1,
+		AddressLine2:   req.AddressLine2,
+		City:           req.City,
+		Region:         req.Region,
+		PostalCode:     req.PostalCode,
+		Country:        req.Country,
+		Gender:         req.Gender,
+		Ethnicity:      req.Ethnicity,
+		MaritalStatus:  req.MaritalStatus,
+		WorkAuthType:   req.WorkAuthType,
+		WorkAuthExpiry: authExpiry,
+		I9Verified:     req.I9Verified,
+		I9VerifiedOn:   i9On,
 	}
 }
 

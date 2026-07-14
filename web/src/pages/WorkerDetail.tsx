@@ -100,6 +100,11 @@ export default function WorkerDetail() {
               <Field label="Gender" value={profile.gender} />
               <Field label="Ethnicity" value={profile.ethnicity} />
               <Field label="Marital status" value={profile.marital_status} />
+              <Field label="Work authorization" value={profile.work_auth_type} />
+              <Field
+                label="I-9 verified"
+                value={profile.i9_verified ? `Yes${profile.i9_verified_on ? " · " + profile.i9_verified_on.slice(0, 10) : ""}` : "No"}
+              />
             </dl>
           )}
         </section>
@@ -178,7 +183,11 @@ function EditForm({ profile, onSaved }: { profile: Profile; onSaved: () => void 
     gender: profile.gender,
     ethnicity: profile.ethnicity,
     marital_status: profile.marital_status,
+    work_auth_type: profile.work_auth_type,
+    work_auth_expiry: profile.work_auth_expiry?.slice(0, 10) ?? "",
+    i9_verified_on: profile.i9_verified_on?.slice(0, 10) ?? "",
   });
+  const [i9Verified, setI9Verified] = useState(profile.i9_verified);
   const [err, setErr] = useState("");
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
@@ -190,6 +199,9 @@ function EditForm({ profile, onSaved }: { profile: Profile; onSaved: () => void 
         ...f,
         employee_number: profile.employee_number,
         hire_date: f.hire_date || null,
+        work_auth_expiry: f.work_auth_expiry || null,
+        i9_verified: i9Verified,
+        i9_verified_on: f.i9_verified_on || null,
         status: profile.status,
       });
       onSaved();
@@ -224,6 +236,17 @@ function EditForm({ profile, onSaved }: { profile: Profile; onSaved: () => void 
         <label>Marital status<input value={f.marital_status} onChange={set("marital_status")} /></label>
       </div>
       <label>Ethnicity<input value={f.ethnicity} onChange={set("ethnicity")} /></label>
+      <div className="two-col">
+        <label>Work authorization<input value={f.work_auth_type} onChange={set("work_auth_type")} placeholder="citizen, visa, …" /></label>
+        <label>Work auth expiry<input type="date" value={f.work_auth_expiry} onChange={set("work_auth_expiry")} /></label>
+      </div>
+      <div className="two-col">
+        <label className="checkbox-row">
+          <input type="checkbox" checked={i9Verified} onChange={(e) => setI9Verified(e.target.checked)} />
+          I-9 verified
+        </label>
+        <label>I-9 verified on<input type="date" value={f.i9_verified_on} onChange={set("i9_verified_on")} /></label>
+      </div>
       {err && <div className="error">{err}</div>}
       <button className="primary">Save changes</button>
     </form>
