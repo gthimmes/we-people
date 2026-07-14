@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: wepeople-db
+    environment:
+      POSTGRES_USER: wepeople
+      POSTGRES_PASSWORD: wepeople
+      POSTGRES_DB: wepeople
+    ports:
+      - "5432:5432"
+    volumes:
+      - wepeople_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wepeople"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  wepeople_pgdata:

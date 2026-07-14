@@ -1,0 +1,39 @@
+import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { useAuth } from "./auth";
+import Login from "./pages/Login";
+import Directory from "./pages/Directory";
+import OrgChart from "./pages/OrgChart";
+
+export default function App() {
+  const { me, loading, logout } = useAuth();
+
+  if (loading) return <div className="center muted">Loading…</div>;
+  if (!me) return <Login />;
+
+  return (
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="brand">
+          We<span>People</span>
+        </div>
+        <nav>
+          <NavLink to="/directory">People</NavLink>
+          <NavLink to="/org-chart">Org chart</NavLink>
+        </nav>
+        <div className="sidebar-footer">
+          <div className="muted small">{me.email}</div>
+          <button className="link" onClick={logout}>
+            Sign out
+          </button>
+        </div>
+      </aside>
+      <main className="content">
+        <Routes>
+          <Route path="/directory" element={<Directory />} />
+          <Route path="/org-chart" element={<OrgChart />} />
+          <Route path="*" element={<Navigate to="/directory" replace />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
