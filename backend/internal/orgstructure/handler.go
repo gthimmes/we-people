@@ -165,6 +165,8 @@ type assignmentRequest struct {
 	PositionID    *string `json:"position_id"`
 	ManagerID     *string `json:"manager_id"`
 	EffectiveDate *string `json:"effective_date"`
+	EventType     string  `json:"event_type"`
+	Reason        string  `json:"reason"`
 }
 
 func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
@@ -194,8 +196,14 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	eventType := req.EventType
+	if eventType != "" && !validAssignEvent[eventType] {
+		httpx.ValidationError(w, map[string]string{"event_type": "must be one of: transfer, promotion"})
+		return
+	}
 	a, err := h.svc.Assign(r.Context(), p.OrgID, p.UserID, AssignInput{
 		WorkerID: workerID, PositionID: positionID, ManagerID: managerID, EffectiveDate: eff,
+		EventType: eventType, Reason: req.Reason,
 	})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not create assignment")
@@ -213,6 +221,10 @@ func (h *Handler) orgChart(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"data": tree})
 }
+
+// validAssignEvent restricts the lifecycle event types an assignment change may
+// record. Other employment events (hire, termination) are recorded elsewhere.
+var validAssignEvent = map[string]bool{"transfer": true, "promotion": true}
 
 // optionalUUID parses an optional UUID string pointer. Returns (nil, true) when
 // absent/empty, and writes a 422 + returns ok=false on a malformed value.

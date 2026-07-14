@@ -29,9 +29,12 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(read).Get("/{id}", h.get)
 	r.With(read).Get("/{id}/profile", h.profile)
 	r.With(read).Get("/{id}/events", h.events)
+	r.With(read).Get("/{id}/emergency-contacts", h.listContacts)
 	r.With(write).Post("/", h.create)
 	r.With(write).Put("/{id}", h.update)
 	r.With(write).Post("/{id}/terminate", h.terminate)
+	r.With(write).Post("/{id}/emergency-contacts", h.addContact)
+	r.With(write).Delete("/{id}/emergency-contacts/{contactId}", h.deleteContact)
 }
 
 type workerRequest struct {
@@ -45,6 +48,32 @@ type workerRequest struct {
 	DateOfBirth    *string `json:"date_of_birth"`
 	HireDate       *string `json:"hire_date"`
 	Status         string  `json:"status"`
+	// Home address
+	AddressLine1 string `json:"address_line1"`
+	AddressLine2 string `json:"address_line2"`
+	City         string `json:"city"`
+	Region       string `json:"region"`
+	PostalCode   string `json:"postal_code"`
+	Country      string `json:"country"`
+	// Demographics
+	Gender        string `json:"gender"`
+	Ethnicity     string `json:"ethnicity"`
+	MaritalStatus string `json:"marital_status"`
+}
+
+// personal maps request fields to the shared PersonalFields struct.
+func (req workerRequest) personal() PersonalFields {
+	return PersonalFields{
+		AddressLine1:  req.AddressLine1,
+		AddressLine2:  req.AddressLine2,
+		City:          req.City,
+		Region:        req.Region,
+		PostalCode:    req.PostalCode,
+		Country:       req.Country,
+		Gender:        req.Gender,
+		Ethnicity:     req.Ethnicity,
+		MaritalStatus: req.MaritalStatus,
+	}
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +103,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		DateOfBirth:    dob,
 		HireDate:       hire,
 		Status:         req.Status,
+		PersonalFields: req.personal(),
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "SQLSTATE 23505") {
@@ -149,15 +179,16 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, err := h.svc.Update(r.Context(), p.OrgID, p.UserID, id, UpdateInput{
-		FirstName:     req.FirstName,
-		LastName:      req.LastName,
-		PreferredName: req.PreferredName,
-		WorkEmail:     req.WorkEmail,
-		PersonalEmail: req.PersonalEmail,
-		Phone:         req.Phone,
-		DateOfBirth:   dob,
-		HireDate:      hire,
-		Status:        req.Status,
+		FirstName:      req.FirstName,
+		LastName:       req.LastName,
+		PreferredName:  req.PreferredName,
+		WorkEmail:      req.WorkEmail,
+		PersonalEmail:  req.PersonalEmail,
+		Phone:          req.Phone,
+		DateOfBirth:    dob,
+		HireDate:       hire,
+		Status:         req.Status,
+		PersonalFields: req.personal(),
 	})
 	if errors.Is(err, ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "not_found", "worker not found")

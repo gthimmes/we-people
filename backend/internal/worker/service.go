@@ -21,6 +21,20 @@ func NewService(store *Store, auditLog *audit.Logger) *Service {
 	return &Service{store: store, audit: auditLog}
 }
 
+// PersonalFields are the optional address + demographic attributes shared by
+// create and update.
+type PersonalFields struct {
+	AddressLine1  string
+	AddressLine2  string
+	City          string
+	Region        string
+	PostalCode    string
+	Country       string
+	Gender        string
+	Ethnicity     string
+	MaritalStatus string
+}
+
 // CreateInput is the payload for hiring/creating a worker.
 type CreateInput struct {
 	EmployeeNumber string
@@ -33,6 +47,7 @@ type CreateInput struct {
 	DateOfBirth    *time.Time
 	HireDate       *time.Time
 	Status         string
+	PersonalFields
 }
 
 // Create inserts a new worker and records a hire lifecycle event, all in one
@@ -55,6 +70,7 @@ func (s *Service) Create(ctx context.Context, orgID, actorUserID uuid.UUID, in C
 		HireDate:       in.HireDate,
 		Status:         status,
 	}
+	applyPersonal(&wk, in.PersonalFields)
 
 	tx, err := s.store.Pool().Begin(ctx)
 	if err != nil {
@@ -120,6 +136,20 @@ type UpdateInput struct {
 	DateOfBirth   *time.Time
 	HireDate      *time.Time
 	Status        string
+	PersonalFields
+}
+
+// applyPersonal copies the personal/demographic fields onto a worker.
+func applyPersonal(wk *Worker, p PersonalFields) {
+	wk.AddressLine1 = p.AddressLine1
+	wk.AddressLine2 = p.AddressLine2
+	wk.City = p.City
+	wk.Region = p.Region
+	wk.PostalCode = p.PostalCode
+	wk.Country = p.Country
+	wk.Gender = p.Gender
+	wk.Ethnicity = p.Ethnicity
+	wk.MaritalStatus = p.MaritalStatus
 }
 
 // Update edits a worker and audit-logs the before/after.
@@ -140,6 +170,7 @@ func (s *Service) Update(ctx context.Context, orgID, actorUserID, id uuid.UUID, 
 	if in.Status != "" {
 		after.Status = in.Status
 	}
+	applyPersonal(&after, in.PersonalFields)
 
 	updated, err := s.store.Update(ctx, after)
 	if err != nil {

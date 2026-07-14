@@ -47,10 +47,19 @@ Public:
 
 Authenticated (`Authorization: Bearer <access>`):
 - `GET /api/v1/me`
-- `GET|POST /api/v1/workers`, `GET|PUT /api/v1/workers/{id}` — perms `worker:read` / `worker:write`
-- `GET|POST /api/v1/departments`, `/locations`, `/positions` — perms `orgstructure:read` / `orgstructure:write`
-- `POST /api/v1/assignments` — assign worker → position + manager
-- `GET /api/v1/org-chart` — reporting hierarchy tree
+- Workers (`worker:read` / `worker:write`):
+  - `GET|POST /api/v1/workers`, `GET|PUT /api/v1/workers/{id}`
+  - `GET /api/v1/workers/{id}/profile` — worker + current position/department/manager
+  - `GET /api/v1/workers/{id}/events` — employment timeline
+  - `POST /api/v1/workers/{id}/terminate`
+  - `GET|POST /api/v1/workers/{id}/emergency-contacts`, `DELETE .../{contactId}`
+- Documents (`worker:read` / `worker:write`):
+  - `GET /api/v1/documents?worker_id=` , `POST /api/v1/documents` (multipart)
+  - `GET /api/v1/documents/{id}/download`, `DELETE /api/v1/documents/{id}`
+- Org structure (`orgstructure:read` / `orgstructure:write`):
+  - `GET|POST /api/v1/departments`, `/locations`, `/positions`
+  - `POST /api/v1/assignments` — assign/transfer/promote (worker → position + manager, optional lifecycle event)
+  - `GET /api/v1/org-chart` — reporting hierarchy tree
 
 ## Layout
 

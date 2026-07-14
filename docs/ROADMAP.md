@@ -20,15 +20,16 @@ The substrate. Nothing user-facing ships without it.
 
 ### Phase 1 — Core HRIS / System of Record *(weeks 2–8)* — **first module** ⭐
 The spine every other module references.
-- Worker records (personal, contact, demographics, emergency contacts)
-- Org structure: legal entities, departments, locations, cost centers
-- Positions & job profiles
-- Employment lifecycle events (hire, transfer, promote, terminate) — effective-dated
-- Reporting hierarchy + org chart
-- Employee & manager self-service
-- Documents (upload, access control)
+- [x] Worker records (personal, contact, demographics, emergency contacts)
+- [x] Org structure: departments, locations, cost centers
+- [x] Positions (job profiles pending)
+- [x] Employment lifecycle events (hire, transfer, promote, terminate) — effective-dated
+- [x] Reporting hierarchy + org chart
+- [x] Documents (upload, download, access control)
+- [x] Worker & manager self-service views (profile detail, org chart)
+- [ ] Remaining: legal entities, job profiles, effective-dated "as of date" queries, work eligibility/I-9 data
 
-> **Deliverable this session:** a working end-to-end slice of Phase 0 + the start of Phase 1 — register an org, log in, and create/list/view workers, departments, positions, and the org chart.
+> **Delivered:** register/login, full worker CRUD + profile detail, address & demographics, emergency contacts, documents (upload/download/delete), departments/locations/positions management, effective-dated assignments with transfer/promote/terminate lifecycle events, and the org chart — all end-to-end with tests.
 
 ### Phase 2 — Time & Absence *(weeks 8–14)*
 First to exercise the **workflow/approval engine** for real.

@@ -189,6 +189,16 @@ func (s *Store) CloseOpenPrimaryTx(ctx context.Context, tx pgx.Tx, orgID, worker
 	return err
 }
 
+// RecordLifecycleEventTx writes an employment event (e.g. transfer, promotion)
+// into the shared lifecycle_events log within a transaction.
+func (s *Store) RecordLifecycleEventTx(ctx context.Context, tx pgx.Tx, orgID, workerID uuid.UUID, eventType string, effectiveDate time.Time, reason string, createdBy *uuid.UUID) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO lifecycle_events (org_id, worker_id, type, effective_date, reason, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6)`,
+		orgID, workerID, eventType, effectiveDate, reason, createdBy)
+	return err
+}
+
 // CreateAssignmentTx inserts an assignment within a transaction.
 func (s *Store) CreateAssignmentTx(ctx context.Context, tx pgx.Tx, a Assignment) (Assignment, error) {
 	err := tx.QueryRow(ctx, `

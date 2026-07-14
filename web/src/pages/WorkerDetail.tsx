@@ -1,9 +1,11 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   api,
   ApiError,
   Assignment,
+  Document as Doc,
+  EmergencyContact,
   LifecycleEvent,
   ListResponse,
   Position,
@@ -29,16 +31,22 @@ export default function WorkerDetail() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [events, setEvents] = useState<LifecycleEvent[]>([]);
+  const [contacts, setContacts] = useState<EmergencyContact[]>([]);
+  const [docs, setDocs] = useState<Doc[]>([]);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
 
   async function reload() {
-    const [p, ev] = await Promise.all([
+    const [p, ev, cs, ds] = await Promise.all([
       api.get<Profile>(`/workers/${id}/profile`),
       api.get<{ data: LifecycleEvent[] }>(`/workers/${id}/events`),
+      api.get<{ data: EmergencyContact[] }>(`/workers/${id}/emergency-contacts`),
+      api.get<{ data: Doc[] }>(`/documents?worker_id=${id}`),
     ]);
     setProfile(p);
     setEvents(ev.data);
+    setContacts(cs.data);
+    setDocs(ds.data);
   }
 
   useEffect(() => {
@@ -48,6 +56,10 @@ export default function WorkerDetail() {
 
   if (error) return <div className="error">{error}</div>;
   if (!profile) return <div className="muted">Loading…</div>;
+
+  const address = [profile.address_line1, profile.address_line2, profile.city, profile.region, profile.postal_code, profile.country]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div>
@@ -84,6 +96,10 @@ export default function WorkerDetail() {
               <Field label="Phone" value={profile.phone} />
               <Field label="Hire date" value={profile.hire_date?.slice(0, 10)} />
               <Field label="Date of birth" value={profile.date_of_birth?.slice(0, 10)} />
+              <Field label="Address" value={address} />
+              <Field label="Gender" value={profile.gender} />
+              <Field label="Ethnicity" value={profile.ethnicity} />
+              <Field label="Marital status" value={profile.marital_status} />
             </dl>
           )}
         </section>
@@ -100,6 +116,21 @@ export default function WorkerDetail() {
             <AssignForm workerId={id} onAssigned={reload} />
           )}
         </section>
+      </div>
+
+      <div className="detail-grid">
+        <ContactsSection
+          workerId={id}
+          contacts={contacts}
+          canWrite={!!canWrite && profile.status !== "terminated"}
+          onChange={reload}
+        />
+        <DocumentsSection
+          workerId={id}
+          docs={docs}
+          canWrite={!!canWrite}
+          onChange={reload}
+        />
       </div>
 
       <section className="card">
@@ -138,8 +169,18 @@ function EditForm({ profile, onSaved }: { profile: Profile; onSaved: () => void 
     personal_email: profile.personal_email,
     phone: profile.phone,
     hire_date: profile.hire_date?.slice(0, 10) ?? "",
+    address_line1: profile.address_line1,
+    address_line2: profile.address_line2,
+    city: profile.city,
+    region: profile.region,
+    postal_code: profile.postal_code,
+    country: profile.country,
+    gender: profile.gender,
+    ethnicity: profile.ethnicity,
+    marital_status: profile.marital_status,
   });
   const [err, setErr] = useState("");
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -160,13 +201,29 @@ function EditForm({ profile, onSaved }: { profile: Profile; onSaved: () => void 
   return (
     <form className="stack" onSubmit={save}>
       <div className="two-col">
-        <label>First name<input value={f.first_name} onChange={(e) => setF({ ...f, first_name: e.target.value })} /></label>
-        <label>Last name<input value={f.last_name} onChange={(e) => setF({ ...f, last_name: e.target.value })} /></label>
+        <label>First name<input value={f.first_name} onChange={set("first_name")} /></label>
+        <label>Last name<input value={f.last_name} onChange={set("last_name")} /></label>
       </div>
-      <label>Work email<input value={f.work_email} onChange={(e) => setF({ ...f, work_email: e.target.value })} /></label>
-      <label>Personal email<input value={f.personal_email} onChange={(e) => setF({ ...f, personal_email: e.target.value })} /></label>
-      <label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
-      <label>Hire date<input type="date" value={f.hire_date} onChange={(e) => setF({ ...f, hire_date: e.target.value })} /></label>
+      <label>Work email<input value={f.work_email} onChange={set("work_email")} /></label>
+      <label>Personal email<input value={f.personal_email} onChange={set("personal_email")} /></label>
+      <div className="two-col">
+        <label>Phone<input value={f.phone} onChange={set("phone")} /></label>
+        <label>Hire date<input type="date" value={f.hire_date} onChange={set("hire_date")} /></label>
+      </div>
+      <label>Address<input value={f.address_line1} onChange={set("address_line1")} placeholder="Street" /></label>
+      <div className="two-col">
+        <label>City<input value={f.city} onChange={set("city")} /></label>
+        <label>Region/State<input value={f.region} onChange={set("region")} /></label>
+      </div>
+      <div className="two-col">
+        <label>Postal code<input value={f.postal_code} onChange={set("postal_code")} /></label>
+        <label>Country<input value={f.country} onChange={set("country")} /></label>
+      </div>
+      <div className="two-col">
+        <label>Gender<input value={f.gender} onChange={set("gender")} /></label>
+        <label>Marital status<input value={f.marital_status} onChange={set("marital_status")} /></label>
+      </div>
+      <label>Ethnicity<input value={f.ethnicity} onChange={set("ethnicity")} /></label>
       {err && <div className="error">{err}</div>}
       <button className="primary">Save changes</button>
     </form>
@@ -201,6 +258,8 @@ function AssignForm({ workerId, onAssigned }: { workerId: string; onAssigned: ()
   const [managers, setManagers] = useState<Worker[]>([]);
   const [positionId, setPositionId] = useState("");
   const [managerId, setManagerId] = useState("");
+  const [eventType, setEventType] = useState("transfer");
+  const [reason, setReason] = useState("");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -215,6 +274,8 @@ function AssignForm({ workerId, onAssigned }: { workerId: string; onAssigned: ()
       worker_id: workerId,
       position_id: positionId || null,
       manager_id: managerId || null,
+      event_type: eventType,
+      reason,
     });
     setOpen(false);
     onAssigned();
@@ -223,6 +284,13 @@ function AssignForm({ workerId, onAssigned }: { workerId: string; onAssigned: ()
   if (!open) return <button className="mt" onClick={() => setOpen(true)}>Change assignment</button>;
   return (
     <form className="stack mt" onSubmit={submit}>
+      <label>
+        Change type
+        <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
+          <option value="transfer">Transfer</option>
+          <option value="promotion">Promotion</option>
+        </select>
+      </label>
       <label>
         Position
         <select value={positionId} onChange={(e) => setPositionId(e.target.value)}>
@@ -241,10 +309,149 @@ function AssignForm({ workerId, onAssigned }: { workerId: string; onAssigned: ()
           ))}
         </select>
       </label>
+      <label>Reason<input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. reorg, promotion" /></label>
       <div className="inline-form">
         <button className="primary">Save assignment</button>
         <button type="button" onClick={() => setOpen(false)}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+function ContactsSection({
+  workerId,
+  contacts,
+  canWrite,
+  onChange,
+}: {
+  workerId: string;
+  contacts: EmergencyContact[];
+  canWrite: boolean;
+  onChange: () => void;
+}) {
+  const [show, setShow] = useState(false);
+  const [f, setF] = useState({ name: "", relationship: "", phone: "", email: "" });
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    await api.post(`/workers/${workerId}/emergency-contacts`, f);
+    setF({ name: "", relationship: "", phone: "", email: "" });
+    setShow(false);
+    onChange();
+  }
+  async function remove(cid: string) {
+    await api.del(`/workers/${workerId}/emergency-contacts/${cid}`);
+    onChange();
+  }
+
+  return (
+    <section className="card">
+      <div className="panel-head">
+        <h3>Emergency contacts</h3>
+        {canWrite && <button className="small-btn" onClick={() => setShow((s) => !s)}>{show ? "Cancel" : "+ Add"}</button>}
+      </div>
+      {show && (
+        <form className="stack panel-form" onSubmit={add}>
+          <div className="two-col">
+            <label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
+            <label>Relationship<input value={f.relationship} onChange={(e) => setF({ ...f, relationship: e.target.value })} /></label>
+          </div>
+          <div className="two-col">
+            <label>Phone<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
+            <label>Email<input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
+          </div>
+          <button className="primary">Save contact</button>
+        </form>
+      )}
+      {contacts.length === 0 ? (
+        <p className="muted">No emergency contacts.</p>
+      ) : (
+        <ul className="list">
+          {contacts.map((c) => (
+            <li key={c.id}>
+              <span>
+                <strong>{c.name}</strong>
+                {c.relationship && <span className="muted"> · {c.relationship}</span>}
+                <div className="muted small">{[c.phone, c.email].filter(Boolean).join(" · ")}</div>
+              </span>
+              {canWrite && <button className="small-btn danger" onClick={() => remove(c.id)}>Remove</button>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function DocumentsSection({
+  workerId,
+  docs,
+  canWrite,
+  onChange,
+}: {
+  workerId: string;
+  docs: Doc[];
+  canWrite: boolean;
+  onChange: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function upload(e: FormEvent) {
+    e.preventDefault();
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("worker_id", workerId);
+      form.append("name", file.name);
+      await api.upload("/documents", form);
+      if (fileRef.current) fileRef.current.value = "";
+      onChange();
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(did: string) {
+    await api.del(`/documents/${did}`);
+    onChange();
+  }
+
+  return (
+    <section className="card">
+      <div className="panel-head">
+        <h3>Documents</h3>
+      </div>
+      {canWrite && (
+        <form className="inline-form panel-form" onSubmit={upload}>
+          <input ref={fileRef} type="file" />
+          <button className="primary" disabled={busy}>{busy ? "Uploading…" : "Upload"}</button>
+        </form>
+      )}
+      {err && <div className="error">{err}</div>}
+      {docs.length === 0 ? (
+        <p className="muted">No documents.</p>
+      ) : (
+        <ul className="list">
+          {docs.map((d) => (
+            <li key={d.id}>
+              <span>
+                <button className="link" onClick={() => api.download(`/documents/${d.id}/download`, d.name)}>
+                  {d.name}
+                </button>
+                <div className="muted small">{(d.size_bytes / 1024).toFixed(1)} KB · {d.created_at.slice(0, 10)}</div>
+              </span>
+              {canWrite && <button className="small-btn danger" onClick={() => remove(d.id)}>Delete</button>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

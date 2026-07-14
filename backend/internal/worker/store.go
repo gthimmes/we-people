@@ -29,8 +29,19 @@ type Worker struct {
 	DateOfBirth    *time.Time `json:"date_of_birth,omitempty"`
 	HireDate       *time.Time `json:"hire_date,omitempty"`
 	Status         string     `json:"status"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// Home address
+	AddressLine1 string `json:"address_line1"`
+	AddressLine2 string `json:"address_line2"`
+	City         string `json:"city"`
+	Region       string `json:"region"`
+	PostalCode   string `json:"postal_code"`
+	Country      string `json:"country"`
+	// Demographics (EEO)
+	Gender        string    `json:"gender"`
+	Ethnicity     string    `json:"ethnicity"`
+	MaritalStatus string    `json:"marital_status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Store provides data access for workers, scoped by org.
@@ -43,7 +54,9 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 const workerCols = `id, org_id, employee_number, first_name, last_name, preferred_name,
-	work_email, personal_email, phone, date_of_birth, hire_date, status, created_at, updated_at`
+	work_email, personal_email, phone, date_of_birth, hire_date, status,
+	address_line1, address_line2, city, region, postal_code, country,
+	gender, ethnicity, marital_status, created_at, updated_at`
 
 // prefixed rewrites a comma-separated column list so each column carries the
 // given table alias, e.g. prefixed("w", "id, name") -> "w.id, w.name".
@@ -59,7 +72,9 @@ func scanWorker(row pgx.Row) (Worker, error) {
 	var wk Worker
 	err := row.Scan(&wk.ID, &wk.OrgID, &wk.EmployeeNumber, &wk.FirstName, &wk.LastName,
 		&wk.PreferredName, &wk.WorkEmail, &wk.PersonalEmail, &wk.Phone,
-		&wk.DateOfBirth, &wk.HireDate, &wk.Status, &wk.CreatedAt, &wk.UpdatedAt)
+		&wk.DateOfBirth, &wk.HireDate, &wk.Status,
+		&wk.AddressLine1, &wk.AddressLine2, &wk.City, &wk.Region, &wk.PostalCode, &wk.Country,
+		&wk.Gender, &wk.Ethnicity, &wk.MaritalStatus, &wk.CreatedAt, &wk.UpdatedAt)
 	return wk, err
 }
 
@@ -67,11 +82,15 @@ func scanWorker(row pgx.Row) (Worker, error) {
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, wk Worker) (Worker, error) {
 	return scanWorker(tx.QueryRow(ctx, `
 		INSERT INTO workers (org_id, employee_number, first_name, last_name, preferred_name,
-			work_email, personal_email, phone, date_of_birth, hire_date, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			work_email, personal_email, phone, date_of_birth, hire_date, status,
+			address_line1, address_line2, city, region, postal_code, country,
+			gender, ethnicity, marital_status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING `+workerCols,
 		wk.OrgID, wk.EmployeeNumber, wk.FirstName, wk.LastName, wk.PreferredName,
-		wk.WorkEmail, wk.PersonalEmail, wk.Phone, wk.DateOfBirth, wk.HireDate, wk.Status))
+		wk.WorkEmail, wk.PersonalEmail, wk.Phone, wk.DateOfBirth, wk.HireDate, wk.Status,
+		wk.AddressLine1, wk.AddressLine2, wk.City, wk.Region, wk.PostalCode, wk.Country,
+		wk.Gender, wk.Ethnicity, wk.MaritalStatus))
 }
 
 // GetByID returns a worker by id, scoped to the org.
@@ -138,11 +157,16 @@ func (s *Store) Update(ctx context.Context, wk Worker) (Worker, error) {
 		UPDATE workers SET
 			first_name = $3, last_name = $4, preferred_name = $5,
 			work_email = $6, personal_email = $7, phone = $8,
-			date_of_birth = $9, hire_date = $10, status = $11, updated_at = now()
+			date_of_birth = $9, hire_date = $10, status = $11,
+			address_line1 = $12, address_line2 = $13, city = $14, region = $15,
+			postal_code = $16, country = $17,
+			gender = $18, ethnicity = $19, marital_status = $20, updated_at = now()
 		WHERE org_id = $1 AND id = $2
 		RETURNING `+workerCols,
 		wk.OrgID, wk.ID, wk.FirstName, wk.LastName, wk.PreferredName,
-		wk.WorkEmail, wk.PersonalEmail, wk.Phone, wk.DateOfBirth, wk.HireDate, wk.Status))
+		wk.WorkEmail, wk.PersonalEmail, wk.Phone, wk.DateOfBirth, wk.HireDate, wk.Status,
+		wk.AddressLine1, wk.AddressLine2, wk.City, wk.Region, wk.PostalCode, wk.Country,
+		wk.Gender, wk.Ethnicity, wk.MaritalStatus))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Worker{}, ErrNotFound
 	}
@@ -237,7 +261,9 @@ func (s *Store) GetProfile(ctx context.Context, orgID, id uuid.UUID) (Profile, e
 		WHERE w.org_id = $1 AND w.id = $2`, orgID, id).
 		Scan(&p.ID, &p.OrgID, &p.EmployeeNumber, &p.FirstName, &p.LastName,
 			&p.PreferredName, &p.WorkEmail, &p.PersonalEmail, &p.Phone,
-			&p.DateOfBirth, &p.HireDate, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+			&p.DateOfBirth, &p.HireDate, &p.Status,
+			&p.AddressLine1, &p.AddressLine2, &p.City, &p.Region, &p.PostalCode, &p.Country,
+			&p.Gender, &p.Ethnicity, &p.MaritalStatus, &p.CreatedAt, &p.UpdatedAt,
 			&p.PositionTitle, &p.DepartmentName, &p.LocationName, &p.ManagerID, &p.ManagerName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Profile{}, ErrNotFound

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -223,6 +224,122 @@ func TestWorkerLifecycle(t *testing.T) {
 	}
 	if len(events.Data) != 2 || events.Data[0].Type != "termination" {
 		t.Errorf("expected termination then hire, got %+v", events.Data)
+	}
+}
+
+func TestPersonalDataContactsAndDocuments(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Docs Co %d", time.Now().UnixNano()),
+		"email":    "hr@docs.co", "password": "password123",
+	}, &reg); s != http.StatusCreated {
+		t.Fatalf("register status = %d", s)
+	}
+	access := reg.Token.AccessToken
+
+	var wk struct {
+		ID string `json:"id"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/workers", access, map[string]any{
+		"employee_number": "D-001", "first_name": "Dee", "last_name": "Ocean",
+	}, &wk); s != http.StatusCreated {
+		t.Fatalf("create worker status = %d", s)
+	}
+
+	// Update personal fields (address + demographics) and read them back.
+	if s := putJSON(t, srv.URL+"/api/v1/workers/"+wk.ID, access, map[string]any{
+		"employee_number": "D-001", "first_name": "Dee", "last_name": "Ocean",
+		"city": "Denver", "region": "CO", "country": "US", "gender": "female",
+	}, nil); s != http.StatusOK {
+		t.Fatalf("update status = %d", s)
+	}
+	var prof struct {
+		City   string `json:"city"`
+		Gender string `json:"gender"`
+	}
+	getJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/profile", access, &prof)
+	if prof.City != "Denver" || prof.Gender != "female" {
+		t.Errorf("personal fields not persisted: %+v", prof)
+	}
+
+	// Emergency contact.
+	if s := postJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/emergency-contacts", access, map[string]any{
+		"name": "Sky Ocean", "relationship": "Sibling", "phone": "555-1000",
+	}, nil); s != http.StatusCreated {
+		t.Fatalf("add contact status = %d", s)
+	}
+	var contacts struct {
+		Data []struct {
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/workers/"+wk.ID+"/emergency-contacts", access, &contacts)
+	if len(contacts.Data) != 1 || contacts.Data[0].Name != "Sky Ocean" {
+		t.Errorf("expected one contact, got %+v", contacts.Data)
+	}
+
+	// Document upload (multipart), list, and download.
+	var doc struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	uploadFile(t, srv.URL+"/api/v1/documents", access, wk.ID, "policy.txt", "hello world", &doc)
+	if doc.ID == "" {
+		t.Fatal("upload returned no id")
+	}
+	var docs struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/documents?worker_id="+wk.ID, access, &docs)
+	if len(docs.Data) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs.Data))
+	}
+	// Download returns the exact bytes.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/documents/"+doc.ID+"/download", nil)
+	req.Header.Set("Authorization", "Bearer "+access)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "hello world" {
+		t.Errorf("download body = %q, want %q", string(body), "hello world")
+	}
+}
+
+func putJSON(t *testing.T, url, token string, body any, out any) int {
+	t.Helper()
+	buf, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	return do(t, req, out)
+}
+
+func uploadFile(t *testing.T, url, token, workerID, filename, content string, out any) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("worker_id", workerID)
+	_ = mw.WriteField("name", filename)
+	fw, _ := mw.CreateFormFile("file", filename)
+	_, _ = fw.Write([]byte(content))
+	mw.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, url, &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	if s := do(t, req, out); s != http.StatusCreated {
+		t.Fatalf("upload status = %d", s)
 	}
 }
 

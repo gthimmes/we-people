@@ -88,16 +88,21 @@ func (s *Service) ListPositions(ctx context.Context, orgID uuid.UUID) ([]Positio
 }
 
 // AssignInput describes assigning a worker to a position and/or manager.
+// EventType, when set (e.g. "transfer", "promotion"), records a matching
+// lifecycle event so the change shows up on the worker's employment timeline.
 type AssignInput struct {
 	WorkerID      uuid.UUID
 	PositionID    *uuid.UUID
 	ManagerID     *uuid.UUID
 	EffectiveDate time.Time
+	EventType     string
+	Reason        string
 }
 
 // Assign places a worker in a position under a manager. It closes any existing
-// open primary assignment (preserving history), creates the new assignment, and
-// marks the target position filled — all in one transaction.
+// open primary assignment (preserving history), creates the new assignment,
+// marks the target position filled, and optionally records a lifecycle event —
+// all in one transaction.
 func (s *Service) Assign(ctx context.Context, orgID, actor uuid.UUID, in AssignInput) (Assignment, error) {
 	if in.EffectiveDate.IsZero() {
 		in.EffectiveDate = time.Now()
@@ -125,6 +130,11 @@ func (s *Service) Assign(ctx context.Context, orgID, actor uuid.UUID, in AssignI
 	}
 	if in.PositionID != nil {
 		if err := s.store.SetPositionStatusTx(ctx, tx, orgID, *in.PositionID, "filled"); err != nil {
+			return Assignment{}, err
+		}
+	}
+	if in.EventType != "" {
+		if err := s.store.RecordLifecycleEventTx(ctx, tx, orgID, in.WorkerID, in.EventType, in.EffectiveDate, in.Reason, &actor); err != nil {
 			return Assignment{}, err
 		}
 	}

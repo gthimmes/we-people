@@ -10,6 +10,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/auth"
 	"github.com/gthimmes/we-people/backend/internal/config"
 	"github.com/gthimmes/we-people/backend/internal/database"
+	"github.com/gthimmes/we-people/backend/internal/documents"
 	"github.com/gthimmes/we-people/backend/internal/httpx"
 	"github.com/gthimmes/we-people/backend/internal/iam"
 	"github.com/gthimmes/we-people/backend/internal/org"
@@ -35,16 +36,19 @@ func New(db *database.DB, cfg config.Config) *App {
 	iamStore := iam.NewStore(pool)
 	workerStore := worker.NewStore(pool)
 	structStore := orgstructure.NewStore(pool)
+	docStore := documents.NewStore(pool)
 
 	// Services
 	iamSvc := iam.NewService(iamStore, orgStore, tokens)
 	workerSvc := worker.NewService(workerStore, auditLog)
 	structSvc := orgstructure.NewService(structStore, auditLog)
+	docSvc := documents.NewService(docStore, auditLog)
 
 	// Handlers
 	iamHandler := iam.NewHandler(iamSvc)
 	workerHandler := worker.NewHandler(workerSvc)
 	structHandler := orgstructure.NewHandler(structSvc)
+	docHandler := documents.NewHandler(docSvc)
 
 	// Auth middleware (loads permissions from the IAM store)
 	authMW := auth.NewMiddleware(tokens, iamStore)
@@ -68,6 +72,7 @@ func New(db *database.DB, cfg config.Config) *App {
 			r.Use(authMW.Authenticate)
 			r.Get("/me", iamHandler.Me)
 			r.Route("/workers", workerHandler.Routes)
+			r.Route("/documents", docHandler.Routes)
 			r.Group(structHandler.Routes)
 		})
 	})
