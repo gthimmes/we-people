@@ -5,6 +5,7 @@ import Directory from "./pages/Directory";
 import WorkerDetail from "./pages/WorkerDetail";
 import OrgManage from "./pages/OrgManage";
 import OrgChart from "./pages/OrgChart";
+import TimeOff from "./pages/TimeOff";
 
 export default function App() {
   const { me, loading, logout } = useAuth();
@@ -22,6 +23,7 @@ export default function App() {
           <NavLink to="/directory">People</NavLink>
           <NavLink to="/org">Organization</NavLink>
           <NavLink to="/org-chart">Org chart</NavLink>
+          <NavLink to="/time-off">Time off</NavLink>
         </nav>
         <div className="sidebar-footer">
           <div className="muted small">{me.email}</div>
@@ -36,6 +38,7 @@ export default function App() {
           <Route path="/people/:id" element={<WorkerDetail />} />
           <Route path="/org" element={<OrgManage />} />
           <Route path="/org-chart" element={<OrgChart />} />
+          <Route path="/time-off" element={<TimeOff />} />
           <Route path="*" element={<Navigate to="/directory" replace />} />
         </Routes>
       </main>

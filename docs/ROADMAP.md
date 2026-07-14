@@ -34,12 +34,16 @@ The spine every other module references.
 
 > **Delivered:** register/login, full worker CRUD + profile detail, address & demographics, emergency contacts, documents (upload/download/delete), departments/locations/positions management, effective-dated assignments with transfer/promote/terminate lifecycle events, and the org chart — all end-to-end with tests.
 
-### Phase 2 — Time & Absence *(weeks 8–14)*
+### Phase 2 — Time & Absence *(weeks 8–14)* — **in progress**
 First to exercise the **workflow/approval engine** for real.
-- Leave policies + accrual engine
-- Time-off requests → approvals → balances
-- Holiday calendars, team absence calendar
-- Timesheets (hourly), overtime rules
+- [x] **Generic approval engine** — requests routed through ordered approver
+  steps, with a finalizer registry so any module can plug in its effect
+  (reused later by offers, comp changes, terminations)
+- [x] Time-off requests → manager approval → balance deduction (atomic)
+- [x] Leave types + balances; employee self-service + manager approval inbox
+- [ ] Accrual engine (scheduled accruals, carryover, caps)
+- [ ] Holiday calendars, team absence calendar
+- [ ] Timesheets (hourly), overtime rules, leaves of absence (FMLA)
 
 ### Phase 3 — Recruiting (ATS) & Onboarding *(weeks 12–20)*
 Feeds new Workers into the HRIS.

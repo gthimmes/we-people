@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gthimmes/we-people/backend/internal/approvals"
 	"github.com/gthimmes/we-people/backend/internal/audit"
 	"github.com/gthimmes/we-people/backend/internal/auth"
 	"github.com/gthimmes/we-people/backend/internal/config"
@@ -20,6 +21,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/iam"
 	"github.com/gthimmes/we-people/backend/internal/org"
 	"github.com/gthimmes/we-people/backend/internal/orgstructure"
+	"github.com/gthimmes/we-people/backend/internal/timeoff"
 	"github.com/gthimmes/we-people/backend/internal/worker"
 )
 
@@ -48,6 +50,9 @@ func run() error {
 	iamSvc := iam.NewService(iam.NewStore(pool), org.NewStore(pool), tokens)
 	workerSvc := worker.NewService(worker.NewStore(pool), auditLog)
 	structSvc := orgstructure.NewService(orgstructure.NewStore(pool), auditLog)
+	approvalSvc := approvals.NewService(approvals.NewStore(pool), auditLog)
+	timeoffSvc := timeoff.NewService(timeoff.NewStore(pool), approvalSvc, auditLog)
+	approvalSvc.RegisterFinalizer(timeoff.RequestType, timeoffSvc)
 
 	reg, err := iamSvc.Register(ctx, "Acme Corp", "admin@acme.test", "password123")
 	if errors.Is(err, iam.ErrSlugTaken) {
@@ -125,6 +130,37 @@ func run() error {
 	assign(alex, salesPos1.ID, &jordan)
 
 	fmt.Println("seeded 6 workers, 2 departments, 1 location, 6 positions, and the org chart")
+
+	// Linked logins so the manager-approval flow is demoable end to end.
+	if _, err := iamSvc.CreateWorkerUser(ctx, orgID, sam.ID, "sam@acme.test", "password123", "Employee"); err != nil {
+		return fmt.Errorf("create sam user: %w", err)
+	}
+	if _, err := iamSvc.CreateWorkerUser(ctx, orgID, priya.ID, "priya@acme.test", "password123", "Employee"); err != nil {
+		return fmt.Errorf("create priya user: %w", err)
+	}
+	fmt.Println("created logins: sam@acme.test (manager), priya@acme.test (reports to Sam) / password123")
+
+	// Leave types and starting balances.
+	vacation, err := timeoffSvc.EnsureLeaveType(ctx, orgID, "Vacation", true)
+	if err != nil {
+		return err
+	}
+	sick, err := timeoffSvc.EnsureLeaveType(ctx, orgID, "Sick", true)
+	if err != nil {
+		return err
+	}
+	if _, err := timeoffSvc.EnsureLeaveType(ctx, orgID, "Personal", true); err != nil {
+		return err
+	}
+	for _, wk := range []worker.Worker{dana, sam, priya, marcus, jordan, alex} {
+		if err := timeoffSvc.GrantBalance(ctx, orgID, wk.ID, vacation.ID, 120); err != nil {
+			return err
+		}
+		if err := timeoffSvc.GrantBalance(ctx, orgID, wk.ID, sick.ID, 40); err != nil {
+			return err
+		}
+	}
+	fmt.Println("seeded 3 leave types and starting balances (120h vacation, 40h sick each)")
 	return nil
 }
 

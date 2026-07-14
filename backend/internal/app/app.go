@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/gthimmes/we-people/backend/internal/approvals"
 	"github.com/gthimmes/we-people/backend/internal/audit"
 	"github.com/gthimmes/we-people/backend/internal/auth"
 	"github.com/gthimmes/we-people/backend/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/iam"
 	"github.com/gthimmes/we-people/backend/internal/org"
 	"github.com/gthimmes/we-people/backend/internal/orgstructure"
+	"github.com/gthimmes/we-people/backend/internal/timeoff"
 	"github.com/gthimmes/we-people/backend/internal/worker"
 )
 
@@ -37,18 +39,26 @@ func New(db *database.DB, cfg config.Config) *App {
 	workerStore := worker.NewStore(pool)
 	structStore := orgstructure.NewStore(pool)
 	docStore := documents.NewStore(pool)
+	approvalStore := approvals.NewStore(pool)
+	timeoffStore := timeoff.NewStore(pool)
 
 	// Services
 	iamSvc := iam.NewService(iamStore, orgStore, tokens)
 	workerSvc := worker.NewService(workerStore, auditLog)
 	structSvc := orgstructure.NewService(structStore, auditLog)
 	docSvc := documents.NewService(docStore, auditLog)
+	approvalSvc := approvals.NewService(approvalStore, auditLog)
+	timeoffSvc := timeoff.NewService(timeoffStore, approvalSvc, auditLog)
+	// Break the approvals<->timeoff cycle: register the consumer's effect handler.
+	approvalSvc.RegisterFinalizer(timeoff.RequestType, timeoffSvc)
 
 	// Handlers
 	iamHandler := iam.NewHandler(iamSvc)
 	workerHandler := worker.NewHandler(workerSvc)
 	structHandler := orgstructure.NewHandler(structSvc)
 	docHandler := documents.NewHandler(docSvc)
+	approvalHandler := approvals.NewHandler(approvalSvc)
+	timeoffHandler := timeoff.NewHandler(timeoffSvc)
 
 	// Auth middleware (loads permissions from the IAM store)
 	authMW := auth.NewMiddleware(tokens, iamStore)
@@ -73,6 +83,8 @@ func New(db *database.DB, cfg config.Config) *App {
 			r.Get("/me", iamHandler.Me)
 			r.Route("/workers", workerHandler.Routes)
 			r.Route("/documents", docHandler.Routes)
+			r.Route("/approvals", approvalHandler.Routes)
+			r.Route("/time-off", timeoffHandler.Routes)
 			r.Group(structHandler.Routes)
 		})
 	})

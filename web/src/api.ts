@@ -248,3 +248,38 @@ export interface Assignment {
   effective_date: string;
   is_primary: boolean;
 }
+
+export interface LeaveType {
+  id: string;
+  name: string;
+  is_paid: boolean;
+}
+
+export interface LeaveBalance {
+  leave_type_id: string;
+  leave_type_name: string;
+  balance_hours: number;
+}
+
+export interface TimeOffRequest {
+  id: string;
+  worker_id: string;
+  leave_type_id: string;
+  leave_type_name?: string;
+  start_date: string;
+  end_date: string;
+  hours: number;
+  reason: string;
+  status: string;
+  approval_request_id?: string;
+}
+
+export interface Approval {
+  id: string;
+  request_type: string;
+  subject_type: string;
+  subject_id: string;
+  requester_worker_id?: string;
+  status: string;
+  created_at: string;
+}

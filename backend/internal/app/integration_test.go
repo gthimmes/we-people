@@ -379,6 +379,102 @@ func TestEffectiveDatedAssignments(t *testing.T) {
 	}
 }
 
+func TestTimeOffApprovalFlow(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Leave Co %d", time.Now().UnixNano()),
+		"email":    "admin@leave.co", "password": "password123",
+	}, &reg)
+	admin := reg.Token.AccessToken
+
+	// Admin creates a leave type and two workers (employee + manager).
+	var lt struct {
+		ID string `json:"id"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/time-off/leave-types", admin, map[string]any{"name": "Vacation"}, &lt); s != http.StatusCreated {
+		t.Fatalf("create leave type = %d", s)
+	}
+	var emp, mgr struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "E-1", "first_name": "Emp", "last_name": "One"}, &emp)
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "M-1", "first_name": "Man", "last_name": "Ager"}, &mgr)
+
+	// Give the employee a starting balance by granting via a request that we
+	// then observe; here we just assign the manager so approval is required.
+	postJSON(t, srv.URL+"/api/v1/assignments", admin, map[string]any{
+		"worker_id": emp.ID, "manager_id": mgr.ID, "effective_date": "2024-01-01",
+	}, nil)
+
+	// Employee's time-off request (filed by admin on their behalf) is pending.
+	var req struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/time-off/requests", admin, map[string]any{
+		"worker_id": emp.ID, "leave_type_id": lt.ID,
+		"start_date": "2026-08-01", "end_date": "2026-08-02", "hours": 16, "reason": "trip",
+	}, &req); s != http.StatusCreated {
+		t.Fatalf("create time-off = %d", s)
+	}
+	if req.Status != "pending" {
+		t.Errorf("expected pending (has manager), got %q", req.Status)
+	}
+
+	// Admin (org:write) sees it in the pending inbox via override and approves.
+	var inbox struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/approvals", admin, &inbox)
+	if len(inbox.Data) == 0 {
+		t.Fatal("admin override inbox is empty")
+	}
+	var decided struct {
+		Status string `json:"status"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/approvals/"+inbox.Data[0].ID+"/decide", admin, map[string]any{"approve": true}, &decided); s != http.StatusOK {
+		t.Fatalf("decide = %d", s)
+	}
+	if decided.Status != "approved" {
+		t.Errorf("approval status = %q, want approved", decided.Status)
+	}
+
+	// The time-off request is now approved and the balance was debited 16h.
+	var reqs struct {
+		Data []struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/time-off/requests?worker_id="+emp.ID, admin, &reqs)
+	if len(reqs.Data) != 1 || reqs.Data[0].Status != "approved" {
+		t.Errorf("request not approved: %+v", reqs.Data)
+	}
+	var bals struct {
+		Data []struct {
+			LeaveTypeName string  `json:"leave_type_name"`
+			BalanceHours  float64 `json:"balance_hours"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/time-off/balances?worker_id="+emp.ID, admin, &bals)
+	var vac float64
+	for _, b := range bals.Data {
+		if b.LeaveTypeName == "Vacation" {
+			vac = b.BalanceHours
+		}
+	}
+	if vac != -16 {
+		t.Errorf("balance after 16h debit = %v, want -16", vac)
+	}
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)

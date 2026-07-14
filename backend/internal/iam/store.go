@@ -93,7 +93,32 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return u, err
 }
 
+// CreateWorkerUserTx inserts a user linked to a worker within a transaction.
+func (s *Store) CreateWorkerUserTx(ctx context.Context, tx pgx.Tx, orgID, workerID uuid.UUID, email, passwordHash string) (User, error) {
+	var u User
+	err := tx.QueryRow(ctx, `
+		INSERT INTO users (org_id, email, password_hash, worker_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, org_id, email, status, worker_id, created_at`,
+		orgID, email, passwordHash, workerID).
+		Scan(&u.ID, &u.OrgID, &u.Email, &u.Status, &u.WorkerID, &u.CreatedAt)
+	return u, err
+}
+
 // --- Roles & permissions ---
+
+// GetRoleByName returns a role by name within an org.
+func (s *Store) GetRoleByName(ctx context.Context, orgID uuid.UUID, name string) (Role, error) {
+	var r Role
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, org_id, name, description, is_system
+		FROM roles WHERE org_id=$1 AND name=$2`, orgID, name).
+		Scan(&r.ID, &r.OrgID, &r.Name, &r.Description, &r.IsSystem)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Role{}, ErrNotFound
+	}
+	return r, err
+}
 
 // CreateRoleTx inserts a role within a transaction.
 func (s *Store) CreateRoleTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, name, desc string, isSystem bool) (Role, error) {

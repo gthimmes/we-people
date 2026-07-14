@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gthimmes/we-people/backend/internal/auth"
 	"github.com/gthimmes/we-people/backend/internal/org"
 )
@@ -88,8 +90,12 @@ func (s *Service) Register(ctx context.Context, orgName, email, password string)
 	if err := s.store.GrantPermissionsTx(ctx, tx, adminRole.ID, allPerms); err != nil {
 		return RegisterResult{}, fmt.Errorf("grant admin perms: %w", err)
 	}
-	if _, err := s.store.CreateRoleTx(ctx, tx, organization.ID, "Employee", "Standard employee self-service", true); err != nil {
+	employeeRole, err := s.store.CreateRoleTx(ctx, tx, organization.ID, "Employee", "Standard employee self-service", true)
+	if err != nil {
 		return RegisterResult{}, fmt.Errorf("create employee role: %w", err)
+	}
+	if err := s.store.GrantPermissionsTx(ctx, tx, employeeRole.ID, []string{"worker:read", "orgstructure:read"}); err != nil {
+		return RegisterResult{}, fmt.Errorf("grant employee perms: %w", err)
 	}
 	if err := s.store.AssignRoleTx(ctx, tx, user.ID, adminRole.ID); err != nil {
 		return RegisterResult{}, fmt.Errorf("assign admin role: %w", err)
@@ -104,6 +110,36 @@ func (s *Service) Register(ctx context.Context, orgName, email, password string)
 		return RegisterResult{}, err
 	}
 	return RegisterResult{Org: organization, User: user, Token: pair}, nil
+}
+
+// CreateWorkerUser creates a login linked to a worker and assigns a role by
+// name. Used by seeding and (later) onboarding.
+func (s *Service) CreateWorkerUser(ctx context.Context, orgID, workerID uuid.UUID, email, password, roleName string) (User, error) {
+	role, err := s.store.GetRoleByName(ctx, orgID, roleName)
+	if err != nil {
+		return User{}, fmt.Errorf("role %q: %w", roleName, err)
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	user, err := s.store.CreateWorkerUserTx(ctx, tx, orgID, workerID, email, hash)
+	if err != nil {
+		return User{}, err
+	}
+	if err := s.store.AssignRoleTx(ctx, tx, user.ID, role.ID); err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, err
+	}
+	return user, nil
 }
 
 // Login authenticates a user by org slug + email + password.
