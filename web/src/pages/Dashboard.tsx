@@ -1,17 +1,28 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, Approval, DashboardSummary } from "../api";
+import { api, Approval, ChecklistTask, DashboardSummary } from "../api";
 import { useAuth } from "../auth";
 
 export default function Dashboard() {
   const { me } = useAuth();
   const [sum, setSum] = useState<DashboardSummary | null>(null);
   const [pending, setPending] = useState(0);
+  const [myTasks, setMyTasks] = useState<ChecklistTask[]>([]);
+
+  function loadTasks() {
+    api.get<{ data: ChecklistTask[] }>("/my-tasks").then((r) => setMyTasks(r.data)).catch(() => setMyTasks([]));
+  }
 
   useEffect(() => {
     api.get<DashboardSummary>("/dashboard").then(setSum).catch(() => setSum(null));
     api.get<{ data: Approval[] }>("/approvals").then((r) => setPending(r.data.length)).catch(() => setPending(0));
+    loadTasks();
   }, []);
+
+  async function completeTask(id: string) {
+    await api.post(`/checklist-tasks/${id}/status`, { status: "done" });
+    loadTasks();
+  }
 
   const firstName = me?.email.split("@")[0];
 
@@ -30,6 +41,24 @@ export default function Dashboard() {
         <StatCard label="Departments" value={sum?.departments ?? "—"} to="/org" />
         <StatCard label="Awaiting you" value={pending} to="/time-off" highlight={pending > 0} />
       </div>
+
+      {myTasks.length > 0 && (
+        <section className="card">
+          <h3>My tasks</h3>
+          <ul className="task-list">
+            {myTasks.map((t) => (
+              <li key={t.id}>
+                <label className="task-check">
+                  <input type="checkbox" checked={false} onChange={() => completeTask(t.id)} />
+                  <span>{t.title}</span>
+                  <span className="muted small"> · {t.plan_name}</span>
+                </label>
+                {t.due_date && <span className="muted small">due {new Date(t.due_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="detail-grid">
         <section className="card">

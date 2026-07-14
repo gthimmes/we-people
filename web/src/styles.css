@@ -320,6 +320,81 @@ label {
   color: var(--brand);
 }
 
+/* Onboarding checklists */
+.plan-row {
+  display: block !important;
+}
+.plan-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+}
+.progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.progress-bar {
+  width: 120px;
+  height: 8px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+.plan-tasks {
+  margin-top: 12px;
+  padding-left: 4px;
+}
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.task-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.task-list li:last-child {
+  border-bottom: none;
+}
+.task-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.task-done {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.template-task-row {
+  display: grid;
+  grid-template-columns: 1fr 130px 90px 36px;
+  gap: 8px;
+  align-items: center;
+}
+.template-task-row input,
+.template-task-row select {
+  width: 100%;
+}
+.offset-input {
+  text-align: center;
+}
+
 /* Checkbox lists (roles, etc.) */
 .field-label {
   font-weight: 600;

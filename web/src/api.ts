@@ -312,6 +312,50 @@ export interface Role {
   permissions: string[];
 }
 
+export interface ChecklistTemplateTask {
+  id?: string;
+  title: string;
+  description: string;
+  assignee: string; // new_hire | manager | hr
+  offset_days: number;
+}
+
+export interface ChecklistTemplate {
+  id: string;
+  name: string;
+  type: string; // onboarding | offboarding
+  description: string;
+  tasks: ChecklistTemplateTask[];
+}
+
+export interface ChecklistPlan {
+  id: string;
+  worker_id: string;
+  worker_name?: string;
+  name: string;
+  type: string;
+  status: string;
+  start_date: string;
+  total_tasks: number;
+  done_tasks: number;
+}
+
+export interface ChecklistTask {
+  id: string;
+  plan_id: string;
+  plan_name?: string;
+  title: string;
+  description: string;
+  assignee_worker_id?: string;
+  assignee_name?: string;
+  due_date?: string;
+  status: string;
+}
+
+export interface PlanWithTasks extends ChecklistPlan {
+  tasks: ChecklistTask[];
+}
+
 export interface DashboardSummary {
   headcount: number;
   open_positions: number;

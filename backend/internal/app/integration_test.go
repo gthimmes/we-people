@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -665,6 +666,97 @@ func TestNotificationsAndUserManagement(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("employee not notified of approval; got %+v", ellaNotifs.Data)
+	}
+}
+
+func TestOnboardingChecklists(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Board Co %d", time.Now().UnixNano()),
+		"email":    "admin@board.co", "password": "password123",
+	}, &reg)
+	admin := reg.Token.AccessToken
+
+	// Employee + manager, employee reports to manager.
+	var emp, mgr struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "E-1", "first_name": "New", "last_name": "Hire"}, &emp)
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "M-1", "first_name": "The", "last_name": "Boss"}, &mgr)
+	postJSON(t, srv.URL+"/api/v1/assignments", admin, map[string]any{"worker_id": emp.ID, "manager_id": mgr.ID, "effective_date": "2024-01-01"}, nil)
+
+	// Template with a new-hire task and a manager task.
+	var tmpl struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/checklist-templates", admin, map[string]any{
+		"name": "Onboarding", "type": "onboarding",
+		"tasks": []map[string]any{
+			{"title": "Sign I-9", "assignee": "new_hire", "offset_days": 0},
+			{"title": "Provision laptop", "assignee": "manager", "offset_days": 1},
+		},
+	}, &tmpl)
+
+	// Instantiate for the employee.
+	var plan struct {
+		ID string `json:"id"`
+	}
+	if s := postJSON(t, srv.URL+"/api/v1/checklist-plans", admin, map[string]any{
+		"worker_id": emp.ID, "template_id": tmpl.ID, "start_date": "2026-08-01",
+	}, &plan); s != http.StatusCreated {
+		t.Fatalf("create plan = %d", s)
+	}
+
+	// Tasks resolved to the right assignees and due dates.
+	var full struct {
+		TotalTasks int `json:"total_tasks"`
+		Tasks      []struct {
+			ID           string `json:"id"`
+			Title        string `json:"title"`
+			AssigneeName string `json:"assignee_name"`
+			DueDate      string `json:"due_date"`
+			Status       string `json:"status"`
+		} `json:"tasks"`
+	}
+	getJSON(t, srv.URL+"/api/v1/checklist-plans/"+plan.ID, admin, &full)
+	if len(full.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(full.Tasks))
+	}
+	byTitle := map[string]struct {
+		ID, Assignee, Due string
+	}{}
+	for _, tk := range full.Tasks {
+		byTitle[tk.Title] = struct{ ID, Assignee, Due string }{tk.ID, tk.AssigneeName, tk.DueDate}
+	}
+	if byTitle["Sign I-9"].Assignee != "New Hire" {
+		t.Errorf("new-hire task assignee = %q, want New Hire", byTitle["Sign I-9"].Assignee)
+	}
+	if byTitle["Provision laptop"].Assignee != "The Boss" {
+		t.Errorf("manager task assignee = %q, want The Boss", byTitle["Provision laptop"].Assignee)
+	}
+	if !strings.HasPrefix(byTitle["Provision laptop"].Due, "2026-08-02") {
+		t.Errorf("manager task due = %q, want 2026-08-02 (start+1)", byTitle["Provision laptop"].Due)
+	}
+
+	// Complete one task (admin override) and verify progress; plan not yet complete.
+	if s := postJSON(t, srv.URL+"/api/v1/checklist-tasks/"+byTitle["Sign I-9"].ID+"/status", admin, map[string]any{"status": "done"}, nil); s != http.StatusNoContent {
+		t.Fatalf("complete task = %d", s)
+	}
+	var plans struct {
+		Data []struct {
+			DoneTasks int    `json:"done_tasks"`
+			Status    string `json:"status"`
+		} `json:"data"`
+	}
+	getJSON(t, srv.URL+"/api/v1/checklist-plans?worker_id="+emp.ID, admin, &plans)
+	if plans.Data[0].DoneTasks != 1 || plans.Data[0].Status != "active" {
+		t.Errorf("after 1 of 2 done: %+v", plans.Data[0])
 	}
 }
 

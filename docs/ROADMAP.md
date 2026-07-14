@@ -53,13 +53,20 @@ First to exercise the **workflow/approval engine** for real.
 - [ ] Holiday calendars, team absence calendar
 - [ ] Timesheets (hourly), overtime rules, leaves of absence (FMLA)
 
-### Phase 3 — Recruiting (ATS) & Onboarding *(weeks 12–20)*
+### Phase 2.5 — Onboarding / offboarding *(Tier 2)* — **done**
+- [x] Checklist **templates** (per role/type) with tasks, assignees (new hire /
+  manager / HR), and due-date offsets
+- [x] Instantiate a template into a per-worker **plan**; assignees + due dates
+  resolved automatically; progress tracked; auto-completes when all tasks done
+- [x] Task completion (assignee or admin), "my tasks", notifications on assignment
+- [x] Shown on the worker profile + a "My tasks" card on the dashboard
+
+### Phase 3 — Recruiting (ATS) *(weeks 12–20)*
 Feeds new Workers into the HRIS.
 - Requisitions + approval
 - Careers page + job postings
 - Candidate pipeline, applications, interviews, scorecards
-- Offers + e-signature
-- Onboarding checklists → convert candidate to Worker
+- Offers + e-signature (onboarding checklists above convert a hire into a Worker)
 
 ### Phase 4 — Performance & Talent *(weeks 18–26)*
 - Goals / OKRs + check-ins

@@ -19,6 +19,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/config"
 	"github.com/gthimmes/we-people/backend/internal/database"
 	"github.com/gthimmes/we-people/backend/internal/iam"
+	"github.com/gthimmes/we-people/backend/internal/onboarding"
 	"github.com/gthimmes/we-people/backend/internal/org"
 	"github.com/gthimmes/we-people/backend/internal/orgstructure"
 	"github.com/gthimmes/we-people/backend/internal/timeoff"
@@ -161,6 +162,37 @@ func run() error {
 		}
 	}
 	fmt.Println("seeded 3 leave types and starting balances (120h vacation, 40h sick each)")
+
+	// Onboarding template + a live plan for Priya so the module has demo data.
+	onboardSvc := onboarding.NewService(onboarding.NewStore(pool), auditLog)
+	tmpl, err := onboardSvc.CreateTemplate(ctx, orgID, actor, onboarding.TemplateInput{
+		Name: "New Hire Onboarding", Type: "onboarding",
+		Description: "Standard first-week checklist",
+		Tasks: []onboarding.TemplateTask{
+			{Title: "Sign offer letter & I-9", Assignee: "new_hire", OffsetDays: 0},
+			{Title: "Set up laptop & accounts", Assignee: "manager", OffsetDays: 0},
+			{Title: "Complete W-4 and direct deposit", Assignee: "new_hire", OffsetDays: 1},
+			{Title: "Meet the team / 1:1 with manager", Assignee: "manager", OffsetDays: 2},
+			{Title: "Read the employee handbook", Assignee: "new_hire", OffsetDays: 3},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("seed onboarding template: %w", err)
+	}
+	if _, err := onboardSvc.CreateTemplate(ctx, orgID, actor, onboarding.TemplateInput{
+		Name: "Offboarding", Type: "offboarding", Description: "Departure checklist",
+		Tasks: []onboarding.TemplateTask{
+			{Title: "Revoke system access", Assignee: "manager", OffsetDays: 0},
+			{Title: "Return laptop & equipment", Assignee: "new_hire", OffsetDays: 0},
+			{Title: "Exit interview", Assignee: "manager", OffsetDays: 1},
+		},
+	}); err != nil {
+		return fmt.Errorf("seed offboarding template: %w", err)
+	}
+	if _, err := onboardSvc.CreatePlan(ctx, orgID, actor, priya.ID, tmpl.ID, *ptrDate("2026-07-13")); err != nil {
+		return fmt.Errorf("seed onboarding plan: %w", err)
+	}
+	fmt.Println("seeded onboarding + offboarding templates and a live plan for Priya")
 	return nil
 }
 

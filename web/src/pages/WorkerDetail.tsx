@@ -4,6 +4,7 @@ import {
   api,
   ApiError,
   Assignment,
+  ChecklistPlan,
   Document as Doc,
   EmergencyContact,
   LifecycleEvent,
@@ -14,6 +15,7 @@ import {
 } from "../api";
 import { useAuth } from "../auth";
 import { DeleteButton } from "../components/CrudPanel";
+import { PlanTasks, Progress } from "./Onboarding";
 
 const eventLabels: Record<string, string> = {
   hire: "Hired",
@@ -35,20 +37,23 @@ export default function WorkerDetail() {
   const [events, setEvents] = useState<LifecycleEvent[]>([]);
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [plans, setPlans] = useState<ChecklistPlan[]>([]);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
 
   async function reload() {
-    const [p, ev, cs, ds] = await Promise.all([
+    const [p, ev, cs, ds, pl] = await Promise.all([
       api.get<Profile>(`/workers/${id}/profile`),
       api.get<{ data: LifecycleEvent[] }>(`/workers/${id}/events`),
       api.get<{ data: EmergencyContact[] }>(`/workers/${id}/emergency-contacts`),
       api.get<{ data: Doc[] }>(`/documents?worker_id=${id}`),
+      api.get<{ data: ChecklistPlan[] }>(`/checklist-plans?worker_id=${id}`),
     ]);
     setProfile(p);
     setEvents(ev.data);
     setContacts(cs.data);
     setDocs(ds.data);
+    setPlans(pl.data);
   }
 
   useEffect(() => {
@@ -147,6 +152,23 @@ export default function WorkerDetail() {
           onChange={reload}
         />
       </div>
+
+      {plans.length > 0 && (
+        <section className="card">
+          <h3>Checklists</h3>
+          <ul className="list">
+            {plans.map((pl) => (
+              <li key={pl.id} className="plan-row">
+                <div className="plan-main">
+                  <span><strong>{pl.name}</strong> <span className={`badge badge-${pl.type === "offboarding" ? "pending" : "active"}`}>{pl.type}</span></span>
+                  <Progress done={pl.done_tasks} total={pl.total_tasks} />
+                </div>
+                <PlanTasks planId={pl.id} canOverride={!!canWrite} onChange={reload} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="card">
         <h3>Employment history</h3>
