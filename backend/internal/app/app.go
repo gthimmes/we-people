@@ -9,6 +9,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/approvals"
 	"github.com/gthimmes/we-people/backend/internal/audit"
 	"github.com/gthimmes/we-people/backend/internal/auth"
+	"github.com/gthimmes/we-people/backend/internal/compensation"
 	"github.com/gthimmes/we-people/backend/internal/config"
 	"github.com/gthimmes/we-people/backend/internal/dashboard"
 	"github.com/gthimmes/we-people/backend/internal/database"
@@ -47,6 +48,7 @@ func New(db *database.DB, cfg config.Config) *App {
 	notifStore := notifications.NewStore(pool)
 	dashStore := dashboard.NewStore(pool)
 	onboardStore := onboarding.NewStore(pool)
+	compStore := compensation.NewStore(pool)
 
 	// Services
 	notifSvc := notifications.NewService(notifStore)
@@ -57,12 +59,14 @@ func New(db *database.DB, cfg config.Config) *App {
 	approvalSvc := approvals.NewService(approvalStore, auditLog)
 	timeoffSvc := timeoff.NewService(timeoffStore, approvalSvc, auditLog)
 	onboardSvc := onboarding.NewService(onboardStore, auditLog)
+	compSvc := compensation.NewService(compStore, auditLog)
 	// Break the approvals<->timeoff cycle: register the consumer's effect handler.
 	approvalSvc.RegisterFinalizer(timeoff.RequestType, timeoffSvc)
 	// Wire notifications into the workflow so approvals aren't silent.
 	approvalSvc.SetNotifier(notifSvc)
 	timeoffSvc.SetNotifier(notifSvc)
 	onboardSvc.SetNotifier(notifSvc)
+	compSvc.SetNotifier(notifSvc)
 
 	// Handlers
 	iamHandler := iam.NewHandler(iamSvc)
@@ -74,6 +78,7 @@ func New(db *database.DB, cfg config.Config) *App {
 	notifHandler := notifications.NewHandler(notifSvc)
 	dashHandler := dashboard.NewHandler(dashStore)
 	onboardHandler := onboarding.NewHandler(onboardSvc)
+	compHandler := compensation.NewHandler(compSvc)
 
 	// Auth middleware (loads permissions from the IAM store)
 	authMW := auth.NewMiddleware(tokens, iamStore)
@@ -104,6 +109,7 @@ func New(db *database.DB, cfg config.Config) *App {
 			r.Route("/dashboard", dashHandler.Routes)
 			r.Group(iamHandler.AdminRoutes)
 			r.Group(onboardHandler.Routes)
+			r.Group(compHandler.Routes)
 			r.Group(structHandler.Routes)
 		})
 	})

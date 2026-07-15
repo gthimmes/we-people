@@ -5,6 +5,8 @@ import {
   ApiError,
   Assignment,
   ChecklistPlan,
+  CompensationHistory,
+  CompensationRecord,
   Document as Doc,
   EmergencyContact,
   LifecycleEvent,
@@ -32,12 +34,15 @@ export default function WorkerDetail() {
   const { me } = useAuth();
   const canWrite = me?.permissions.includes("worker:write");
   const canAssign = me?.permissions.includes("orgstructure:write");
+  const canReadComp = !!me?.permissions.includes("compensation:read");
+  const canWriteComp = !!me?.permissions.includes("compensation:write");
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [events, setEvents] = useState<LifecycleEvent[]>([]);
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [plans, setPlans] = useState<ChecklistPlan[]>([]);
+  const [comp, setComp] = useState<CompensationHistory | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
 
@@ -54,6 +59,9 @@ export default function WorkerDetail() {
     setContacts(cs.data);
     setDocs(ds.data);
     setPlans(pl.data);
+    if (canReadComp) {
+      api.get<CompensationHistory>(`/compensation?worker_id=${id}`).then(setComp).catch(() => setComp(null));
+    }
   }
 
   useEffect(() => {
@@ -152,6 +160,10 @@ export default function WorkerDetail() {
           onChange={reload}
         />
       </div>
+
+      {canReadComp && (
+        <CompensationSection workerId={id} comp={comp} canWrite={canWriteComp} onChange={reload} />
+      )}
 
       {plans.length > 0 && (
         <section className="card">
@@ -370,6 +382,87 @@ function AssignForm({ workerId, onAssigned }: { workerId: string; onAssigned: ()
         <button type="button" onClick={() => setOpen(false)}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+function money(r: CompensationRecord) {
+  const n = new Intl.NumberFormat(undefined, { style: "currency", currency: r.currency || "USD", maximumFractionDigits: 0 });
+  return `${n.format(r.amount)} / ${r.pay_frequency}`;
+}
+
+function CompensationSection({ workerId, comp, canWrite, onChange }: { workerId: string; comp: CompensationHistory | null; canWrite: boolean; onChange: () => void }) {
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ effective_date: "", amount: "", pay_frequency: "annual", reason: "" });
+  const [err, setErr] = useState("");
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    setErr("");
+    try {
+      await api.post("/compensation", {
+        worker_id: workerId,
+        effective_date: f.effective_date,
+        amount: Number(f.amount),
+        pay_type: "salary",
+        pay_frequency: f.pay_frequency,
+        reason: f.reason,
+      });
+      setF({ effective_date: "", amount: "", pay_frequency: "annual", reason: "" });
+      setAdding(false);
+      onChange();
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : "Could not add compensation");
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="panel-head">
+        <h3>Compensation</h3>
+        {canWrite && <button className="small-btn" onClick={() => setAdding((a) => !a)}>{adding ? "Cancel" : "+ Add change"}</button>}
+      </div>
+      {comp?.current ? (
+        <div className="comp-current">
+          <span className="comp-amount">{money(comp.current)}</span>
+          <span className="muted small"> · since {comp.current.effective_date.slice(0, 10)}</span>
+        </div>
+      ) : (
+        <p className="muted">No compensation on record.</p>
+      )}
+      {adding && (
+        <form className="stack panel-form" onSubmit={add}>
+          <div className="two-col">
+            <label>Effective date<input type="date" value={f.effective_date} onChange={(e) => setF({ ...f, effective_date: e.target.value })} required /></label>
+            <label>Amount<input type="number" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} required /></label>
+          </div>
+          <div className="two-col">
+            <label>
+              Frequency
+              <select value={f.pay_frequency} onChange={(e) => setF({ ...f, pay_frequency: e.target.value })}>
+                <option value="annual">annual</option>
+                <option value="monthly">monthly</option>
+                <option value="biweekly">biweekly</option>
+                <option value="weekly">weekly</option>
+                <option value="hourly">hourly</option>
+              </select>
+            </label>
+            <label>Reason<input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. merit increase" /></label>
+          </div>
+          {err && <div className="error">{err}</div>}
+          <button className="primary">Save change</button>
+        </form>
+      )}
+      {comp && comp.history.length > 0 && (
+        <ul className="list comp-history">
+          {comp.history.map((r) => (
+            <li key={r.id}>
+              <span><strong>{money(r)}</strong>{r.reason && <span className="muted small"> · {r.reason}</span>}</span>
+              <span className="muted small">eff {r.effective_date.slice(0, 10)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

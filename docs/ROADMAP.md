@@ -77,8 +77,11 @@ Feeds new Workers into the HRIS.
 - Calibration + 9-box, succession, skills
 
 ### Phase 5 — Compensation & Benefits *(weeks 24–32)*
+- [x] **Compensation records** — effective-dated pay history per worker
+  (amount, type, frequency, reason), current-comp resolution, dedicated
+  `compensation:read/write` permissions, worker notified on change *(Tier 2)*
 - Pay grades / salary bands
-- Comp records + merit cycles
+- Merit cycles (reuses the approval engine)
 - Benefit plans, deductions
 - Open enrollment + life events, dependents/beneficiaries
 

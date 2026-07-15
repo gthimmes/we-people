@@ -16,6 +16,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/approvals"
 	"github.com/gthimmes/we-people/backend/internal/audit"
 	"github.com/gthimmes/we-people/backend/internal/auth"
+	"github.com/gthimmes/we-people/backend/internal/compensation"
 	"github.com/gthimmes/we-people/backend/internal/config"
 	"github.com/gthimmes/we-people/backend/internal/database"
 	"github.com/gthimmes/we-people/backend/internal/iam"
@@ -199,6 +200,23 @@ func run() error {
 		return fmt.Errorf("seed onboarding plan: %w", err)
 	}
 	fmt.Println("seeded onboarding + offboarding templates and a live plan for Priya")
+
+	// Compensation records (initial + a raise) for a few workers.
+	compSvc := compensation.NewService(compensation.NewStore(pool), auditLog)
+	comp := func(wk worker.Worker, date string, amount float64, reason string) {
+		if _, e := compSvc.Add(ctx, orgID, actor, compensation.Record{
+			WorkerID: wk.ID, EffectiveDate: *ptrDate(date), PayType: "salary",
+			Amount: amount, Currency: "USD", PayFrequency: "annual", Reason: reason,
+		}); e != nil {
+			panic(e)
+		}
+	}
+	comp(dana, "2023-01-15", 240000, "Initial")
+	comp(sam, "2023-01-15", 165000, "Initial")
+	comp(sam, "2024-02-01", 178000, "Annual merit increase")
+	comp(priya, "2023-01-15", 130000, "Initial")
+	comp(priya, "2026-07-01", 145000, "Promotion to L4")
+	fmt.Println("seeded compensation history")
 	return nil
 }
 

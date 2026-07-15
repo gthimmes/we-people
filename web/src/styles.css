@@ -320,6 +320,19 @@ label {
   color: var(--brand);
 }
 
+/* Compensation */
+.comp-current {
+  margin-bottom: 10px;
+}
+.comp-amount {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.comp-history {
+  margin-top: 8px;
+}
+
 /* Onboarding checklists */
 .plan-row {
   display: block !important;

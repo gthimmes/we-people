@@ -360,6 +360,22 @@ export interface PlanWithTasks extends ChecklistPlan {
   tasks: ChecklistTask[];
 }
 
+export interface CompensationRecord {
+  id: string;
+  worker_id: string;
+  effective_date: string;
+  pay_type: string;
+  amount: number;
+  currency: string;
+  pay_frequency: string;
+  reason: string;
+}
+
+export interface CompensationHistory {
+  current: CompensationRecord | null;
+  history: CompensationRecord[];
+}
+
 export interface DashboardSummary {
   headcount: number;
   open_positions: number;

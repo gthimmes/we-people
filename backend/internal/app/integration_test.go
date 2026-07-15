@@ -835,6 +835,56 @@ func TestLeaveAccrualEngine(t *testing.T) {
 	}
 }
 
+func TestCompensation(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Comp Co %d", time.Now().UnixNano()),
+		"email":    "admin@comp.co", "password": "password123",
+	}, &reg)
+	admin := reg.Token.AccessToken
+
+	var wk struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "P-1", "first_name": "Pay", "last_name": "Ee"}, &wk)
+
+	// Initial, a past raise, and a future raise.
+	for _, c := range []map[string]any{
+		{"worker_id": wk.ID, "effective_date": "2023-01-01", "amount": 100000, "reason": "Initial"},
+		{"worker_id": wk.ID, "effective_date": "2025-06-01", "amount": 120000, "reason": "Merit"},
+		{"worker_id": wk.ID, "effective_date": "2099-01-01", "amount": 200000, "reason": "Future"},
+	} {
+		if s := postJSON(t, srv.URL+"/api/v1/compensation", admin, c, nil); s != http.StatusCreated {
+			t.Fatalf("add comp = %d", s)
+		}
+	}
+
+	var res struct {
+		Current *struct {
+			Amount float64 `json:"amount"`
+			Reason string  `json:"reason"`
+		} `json:"current"`
+		History []struct {
+			Amount float64 `json:"amount"`
+		} `json:"history"`
+	}
+	getJSON(t, srv.URL+"/api/v1/compensation?worker_id="+wk.ID, admin, &res)
+	if len(res.History) != 3 {
+		t.Fatalf("history length = %d, want 3", len(res.History))
+	}
+	// Current must be the latest record effective on/before today (120k), not the
+	// future 200k record.
+	if res.Current == nil || res.Current.Amount != 120000 {
+		t.Errorf("current = %+v, want 120000 (Merit)", res.Current)
+	}
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)
