@@ -141,12 +141,18 @@ func run() error {
 	}
 	fmt.Println("created logins: sam@acme.test (manager), priya@acme.test (reports to Sam) / password123")
 
-	// Leave types and starting balances.
-	vacation, err := timeoffSvc.EnsureLeaveType(ctx, orgID, "Vacation", true)
+	// Leave types (with accrual config) and starting balances.
+	carryover := 80.0
+	vacation, err := timeoffSvc.CreateLeaveType(ctx, orgID, timeoff.LeaveType{
+		Name: "Vacation", IsPaid: true, AccrualEnabled: true,
+		AccrualAnnualHours: 120, MaxBalanceHours: 240, CarryoverMaxHours: &carryover,
+	})
 	if err != nil {
 		return err
 	}
-	sick, err := timeoffSvc.EnsureLeaveType(ctx, orgID, "Sick", true)
+	sick, err := timeoffSvc.CreateLeaveType(ctx, orgID, timeoff.LeaveType{
+		Name: "Sick", IsPaid: true, AccrualEnabled: true, AccrualAnnualHours: 48, MaxBalanceHours: 80,
+	})
 	if err != nil {
 		return err
 	}

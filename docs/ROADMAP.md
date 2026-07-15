@@ -49,7 +49,9 @@ First to exercise the **workflow/approval engine** for real.
   (reused later by offers, comp changes, terminations)
 - [x] Time-off requests → manager approval → balance deduction (atomic)
 - [x] Leave types + balances; employee self-service + manager approval inbox
-- [ ] Accrual engine (scheduled accruals, carryover, caps)
+- [x] **Accrual engine** — per-period accrual with balance **caps**, **carryover**
+  limits (incl. use-it-or-lose-it), idempotent runs, a ledger, admin run buttons,
+  and a `cmd/accrue` for cron
 - [ ] Holiday calendars, team absence calendar
 - [ ] Timesheets (hourly), overtime rules, leaves of absence (FMLA)
 

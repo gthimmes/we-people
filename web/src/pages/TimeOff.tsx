@@ -10,7 +10,7 @@ import {
   Worker,
 } from "../api";
 import { useAuth } from "../auth";
-import CrudPanel, { DeleteButton } from "../components/CrudPanel";
+import { DeleteButton } from "../components/CrudPanel";
 
 // An approval enriched with the underlying time-off details for display.
 interface InboxItem {
@@ -190,22 +190,119 @@ export default function TimeOff() {
         </section>
       )}
 
-      {isAdmin && (
-        <CrudPanel<LeaveType>
-          title="Leave types (admin)"
-          canWrite
-          fields={[{ key: "name", label: "Name", required: true }]}
-          items={types}
-          idOf={(t) => t.id}
-          toForm={(t) => ({ name: t.name })}
-          summary={(t) => <strong>{t.name}</strong>}
-          create={(b) => api.post("/time-off/leave-types", b)}
-          update={(id, b) => api.put(`/time-off/leave-types/${id}`, b)}
-          remove={(id) => api.del(`/time-off/leave-types/${id}`)}
-          onChange={reloadAll}
-        />
-      )}
+      {isAdmin && <LeaveTypesAdmin types={types} onChange={reloadAll} />}
     </div>
+  );
+}
+
+function LeaveTypesAdmin({ types, onChange }: { types: LeaveType[]; onChange: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [runMsg, setRunMsg] = useState("");
+
+  async function runAccrual() {
+    const r = await api.post<{ hours_credited: number; workers_credited: number; period: string }>("/time-off/accruals/run");
+    setRunMsg(`Accrued ${r.hours_credited}h across ${r.workers_credited} workers for ${r.period}.`);
+    onChange();
+  }
+  async function runCarryover() {
+    const r = await api.post<{ hours_credited: number; workers_credited: number }>("/time-off/accruals/carryover");
+    setRunMsg(`Carryover applied: ${Math.abs(r.hours_credited)}h adjusted across ${r.workers_credited} workers.`);
+    onChange();
+  }
+
+  return (
+    <section className="card">
+      <div className="panel-head">
+        <h3>Leave types (admin)</h3>
+        <span className="inline-form">
+          <button className="small-btn" onClick={runAccrual}>Run this month's accrual</button>
+          <button className="small-btn" onClick={runCarryover}>Run year-end carryover</button>
+          <button className="small-btn" onClick={() => { setAdding((a) => !a); setEditing(null); }}>{adding ? "Cancel" : "+ Add"}</button>
+        </span>
+      </div>
+      {runMsg && <div className="muted small" style={{ marginBottom: 10 }}>{runMsg}</div>}
+      {adding && <LeaveTypeForm onSubmit={async (b) => { await api.post("/time-off/leave-types", b); setAdding(false); onChange(); }} onCancel={() => setAdding(false)} />}
+      <ul className="list">
+        {types.map((t) =>
+          editing === t.id ? (
+            <li key={t.id} className="crud-editing">
+              <LeaveTypeForm initial={t} onSubmit={async (b) => { await api.put(`/time-off/leave-types/${t.id}`, b); setEditing(null); onChange(); }} onCancel={() => setEditing(null)} />
+            </li>
+          ) : (
+            <li key={t.id}>
+              <span>
+                <strong>{t.name}</strong>
+                <span className="muted small">
+                  {t.accrual_enabled
+                    ? ` · accrues ${t.accrual_annual_hours}h/yr${t.max_balance_hours > 0 ? `, cap ${t.max_balance_hours}h` : ""}${t.carryover_max_hours != null ? `, carryover ${t.carryover_max_hours}h` : ", unlimited carryover"}`
+                    : " · no accrual"}
+                </span>
+              </span>
+              <span className="row-actions">
+                <button className="small-btn" onClick={() => { setEditing(t.id); setAdding(false); }}>Edit</button>
+                <DeleteButton onDelete={async () => { await api.del(`/time-off/leave-types/${t.id}`); onChange(); }} />
+              </span>
+            </li>
+          )
+        )}
+        {types.length === 0 && <li className="muted">No leave types yet.</li>}
+      </ul>
+    </section>
+  );
+}
+
+function LeaveTypeForm({ initial, onSubmit, onCancel }: { initial?: LeaveType; onSubmit: (b: Record<string, unknown>) => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [accrual, setAccrual] = useState(initial?.accrual_enabled ?? false);
+  const [annual, setAnnual] = useState(String(initial?.accrual_annual_hours ?? 120));
+  const [maxBal, setMaxBal] = useState(String(initial?.max_balance_hours ?? 0));
+  const [unlimited, setUnlimited] = useState(initial ? initial.carryover_max_hours == null : true);
+  const [carryover, setCarryover] = useState(String(initial?.carryover_max_hours ?? 0));
+  const [err, setErr] = useState("");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setErr("");
+    try {
+      await onSubmit({
+        name,
+        accrual_enabled: accrual,
+        accrual_annual_hours: accrual ? Number(annual) : 0,
+        max_balance_hours: accrual ? Number(maxBal) : 0,
+        carryover_max_hours: unlimited ? null : Number(carryover),
+      });
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : "Failed");
+    }
+  }
+
+  return (
+    <form className="stack panel-form" onSubmit={submit}>
+      <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={accrual} onChange={(e) => setAccrual(e.target.checked)} />
+        Accrues over time
+      </label>
+      {accrual && (
+        <>
+          <div className="two-col">
+            <label>Hours per year<input type="number" value={annual} onChange={(e) => setAnnual(e.target.value)} /></label>
+            <label>Max balance (0 = uncapped)<input type="number" value={maxBal} onChange={(e) => setMaxBal(e.target.value)} /></label>
+          </div>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} />
+            Unlimited year-end carryover
+          </label>
+          {!unlimited && <label>Carryover cap (hours)<input type="number" value={carryover} onChange={(e) => setCarryover(e.target.value)} /></label>}
+        </>
+      )}
+      {err && <div className="error">{err}</div>}
+      <div className="inline-form">
+        <button className="primary">Save</button>
+        <button type="button" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
   );
 }
 

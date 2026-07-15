@@ -27,6 +27,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(admin).Post("/leave-types", h.createLeaveType)
 	r.With(admin).Put("/leave-types/{id}", h.updateLeaveType)
 	r.With(admin).Delete("/leave-types/{id}", h.deleteLeaveType)
+	r.With(admin).Post("/accruals/run", h.runAccrual)
+	r.With(admin).Post("/accruals/carryover", h.runCarryover)
 	r.Get("/balances", h.balances)     // ?worker_id= (defaults to caller)
 	r.Get("/requests", h.listRequests) // ?worker_id= (defaults to caller)
 	r.Post("/requests", h.createRequest)
@@ -48,11 +50,7 @@ func (h *Handler) updateLeaveType(w http.ResponseWriter, r *http.Request) {
 		httpx.ValidationError(w, map[string]string{"name": "name is required"})
 		return
 	}
-	isPaid := true
-	if req.IsPaid != nil {
-		isPaid = *req.IsPaid
-	}
-	lt, err := h.svc.UpdateLeaveType(r.Context(), p.OrgID, id, req.Name, isPaid)
+	lt, err := h.svc.UpdateLeaveType(r.Context(), p.OrgID, id, req.toLeaveType())
 	if errors.Is(err, ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "not_found", "leave type not found")
 		return
@@ -111,8 +109,24 @@ func (h *Handler) cancelRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 type leaveTypeRequest struct {
-	Name   string `json:"name"`
-	IsPaid *bool  `json:"is_paid"`
+	Name               string   `json:"name"`
+	IsPaid             *bool    `json:"is_paid"`
+	AccrualEnabled     bool     `json:"accrual_enabled"`
+	AccrualAnnualHours float64  `json:"accrual_annual_hours"`
+	MaxBalanceHours    float64  `json:"max_balance_hours"`
+	CarryoverMaxHours  *float64 `json:"carryover_max_hours"`
+}
+
+func (r leaveTypeRequest) toLeaveType() LeaveType {
+	isPaid := true
+	if r.IsPaid != nil {
+		isPaid = *r.IsPaid
+	}
+	return LeaveType{
+		Name: r.Name, IsPaid: isPaid,
+		AccrualEnabled: r.AccrualEnabled, AccrualAnnualHours: r.AccrualAnnualHours,
+		MaxBalanceHours: r.MaxBalanceHours, CarryoverMaxHours: r.CarryoverMaxHours,
+	}
 }
 
 func (h *Handler) createLeaveType(w http.ResponseWriter, r *http.Request) {
@@ -125,11 +139,7 @@ func (h *Handler) createLeaveType(w http.ResponseWriter, r *http.Request) {
 		httpx.ValidationError(w, map[string]string{"name": "name is required"})
 		return
 	}
-	isPaid := true
-	if req.IsPaid != nil {
-		isPaid = *req.IsPaid
-	}
-	lt, err := h.svc.EnsureLeaveType(r.Context(), p.OrgID, req.Name, isPaid)
+	lt, err := h.svc.CreateLeaveType(r.Context(), p.OrgID, req.toLeaveType())
 	if err != nil {
 		if strings.Contains(err.Error(), "SQLSTATE 23505") {
 			httpx.Error(w, http.StatusConflict, "duplicate", "a leave type with that name already exists")
@@ -139,6 +149,50 @@ func (h *Handler) createLeaveType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, lt)
+}
+
+type runAccrualRequest struct {
+	Period string `json:"period"` // YYYY-MM; defaults to current month
+}
+
+func (h *Handler) runAccrual(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	var req runAccrualRequest
+	if r.ContentLength > 0 && !httpx.Decode(w, r, &req) {
+		return
+	}
+	period := req.Period
+	if period == "" {
+		period = time.Now().Format("2006-01")
+	}
+	res, err := h.svc.RunAccrual(r.Context(), p.OrgID, period)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not run accrual")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+type runCarryoverRequest struct {
+	Year int `json:"year"`
+}
+
+func (h *Handler) runCarryover(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFrom(r.Context())
+	var req runCarryoverRequest
+	if r.ContentLength > 0 && !httpx.Decode(w, r, &req) {
+		return
+	}
+	year := req.Year
+	if year == 0 {
+		year = time.Now().Year()
+	}
+	res, err := h.svc.RunCarryover(r.Context(), p.OrgID, year)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not run carryover")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) listLeaveTypes(w http.ResponseWriter, r *http.Request) {

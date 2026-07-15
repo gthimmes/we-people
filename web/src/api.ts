@@ -253,6 +253,10 @@ export interface LeaveType {
   id: string;
   name: string;
   is_paid: boolean;
+  accrual_enabled: boolean;
+  accrual_annual_hours: number;
+  max_balance_hours: number;
+  carryover_max_hours?: number | null;
 }
 
 export interface LeaveBalance {

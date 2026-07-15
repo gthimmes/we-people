@@ -760,6 +760,81 @@ func TestOnboardingChecklists(t *testing.T) {
 	}
 }
 
+func TestLeaveAccrualEngine(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Accrue Co %d", time.Now().UnixNano()),
+		"email":    "admin@accrue.co", "password": "password123",
+	}, &reg)
+	admin := reg.Token.AccessToken
+
+	var wk struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "A-1", "first_name": "Ann", "last_name": "Nual"}, &wk)
+
+	// 120h/yr = 10h/mo, capped at 15h, carryover cap 8h.
+	var lt struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/time-off/leave-types", admin, map[string]any{
+		"name": "Vacation", "accrual_enabled": true, "accrual_annual_hours": 120,
+		"max_balance_hours": 15, "carryover_max_hours": 8,
+	}, &lt)
+
+	balance := func() float64 {
+		var b struct {
+			Data []struct {
+				LeaveTypeName string  `json:"leave_type_name"`
+				BalanceHours  float64 `json:"balance_hours"`
+			} `json:"data"`
+		}
+		getJSON(t, srv.URL+"/api/v1/time-off/balances?worker_id="+wk.ID, admin, &b)
+		for _, x := range b.Data {
+			if x.LeaveTypeName == "Vacation" {
+				return x.BalanceHours
+			}
+		}
+		return -1
+	}
+	accrue := func(period string) {
+		if s := postJSON(t, srv.URL+"/api/v1/time-off/accruals/run", admin, map[string]any{"period": period}, nil); s != http.StatusOK {
+			t.Fatalf("accrual %s = %d", period, s)
+		}
+	}
+
+	accrue("2026-01")
+	if got := balance(); got != 10 {
+		t.Fatalf("after 1 month = %v, want 10", got)
+	}
+	accrue("2026-01") // idempotent
+	if got := balance(); got != 10 {
+		t.Fatalf("re-run same period = %v, want 10 (idempotent)", got)
+	}
+	accrue("2026-02") // 10 -> 15 (capped, +5 not +10)
+	if got := balance(); got != 15 {
+		t.Fatalf("after 2 months = %v, want 15 (capped)", got)
+	}
+	accrue("2026-03") // already at cap -> no change
+	if got := balance(); got != 15 {
+		t.Fatalf("at cap = %v, want 15", got)
+	}
+
+	// Carryover forfeits down to 8.
+	if s := postJSON(t, srv.URL+"/api/v1/time-off/accruals/carryover", admin, map[string]any{"year": 2026}, nil); s != http.StatusOK {
+		t.Fatalf("carryover = %d", s)
+	}
+	if got := balance(); got != 8 {
+		t.Errorf("after carryover = %v, want 8", got)
+	}
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)

@@ -170,14 +170,141 @@ func (s *Service) ListForWorker(ctx context.Context, orgID, workerID uuid.UUID) 
 	return r, err
 }
 
-// EnsureLeaveType creates a leave type (used by seeding/admin).
+// EnsureLeaveType creates a basic leave type (used by seeding).
 func (s *Service) EnsureLeaveType(ctx context.Context, orgID uuid.UUID, name string, isPaid bool) (LeaveType, error) {
-	return s.store.CreateLeaveType(ctx, orgID, name, isPaid)
+	return s.store.CreateLeaveType(ctx, orgID, LeaveType{Name: name, IsPaid: isPaid})
 }
 
-// UpdateLeaveType edits a leave type.
-func (s *Service) UpdateLeaveType(ctx context.Context, orgID, id uuid.UUID, name string, isPaid bool) (LeaveType, error) {
-	return s.store.UpdateLeaveType(ctx, orgID, id, name, isPaid)
+// CreateLeaveType creates a leave type with accrual config.
+func (s *Service) CreateLeaveType(ctx context.Context, orgID uuid.UUID, lt LeaveType) (LeaveType, error) {
+	return s.store.CreateLeaveType(ctx, orgID, lt)
+}
+
+// UpdateLeaveType edits a leave type and its accrual config.
+func (s *Service) UpdateLeaveType(ctx context.Context, orgID, id uuid.UUID, lt LeaveType) (LeaveType, error) {
+	return s.store.UpdateLeaveType(ctx, orgID, id, lt)
+}
+
+// AccrualResult summarizes an accrual run.
+type AccrualResult struct {
+	Period          string  `json:"period"`
+	WorkersCredited int     `json:"workers_credited"`
+	HoursCredited   float64 `json:"hours_credited"`
+}
+
+// RunAccrual credits one period's accrual to every active worker for each
+// accrual-enabled leave type, respecting balance caps. Idempotent per period.
+func (s *Service) RunAccrual(ctx context.Context, orgID uuid.UUID, period string) (AccrualResult, error) {
+	types, err := s.store.AccrualTypes(ctx, orgID)
+	if err != nil {
+		return AccrualResult{}, err
+	}
+	workers, err := s.store.ActiveWorkerIDs(ctx, orgID)
+	if err != nil {
+		return AccrualResult{}, err
+	}
+
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return AccrualResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	res := AccrualResult{Period: period}
+	credited := map[uuid.UUID]bool{}
+	for _, lt := range types {
+		monthly := lt.AccrualAnnualHours / 12
+		for _, wid := range workers {
+			current, err := s.store.BalanceHours(ctx, tx, orgID, wid, lt.ID)
+			if err != nil {
+				return AccrualResult{}, err
+			}
+			delta := monthly
+			if lt.MaxBalanceHours > 0 {
+				room := lt.MaxBalanceHours - current
+				if room <= 0 {
+					continue // at or above cap; accrual paused
+				}
+				if delta > room {
+					delta = room
+				}
+			}
+			if delta <= 0 {
+				continue
+			}
+			inserted, err := s.store.RecordAccrualTx(ctx, tx, orgID, wid, lt.ID, period, "accrual", delta)
+			if err != nil {
+				return AccrualResult{}, err
+			}
+			if inserted {
+				if err := s.store.AdjustBalanceTx(ctx, tx, orgID, wid, lt.ID, delta); err != nil {
+					return AccrualResult{}, err
+				}
+				res.HoursCredited += delta
+				credited[wid] = true
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AccrualResult{}, err
+	}
+	res.WorkersCredited = len(credited)
+	return res, nil
+}
+
+// RunCarryover forfeits balance above each leave type's carryover cap at a year
+// boundary. Leave types with an unlimited (null) cap are untouched. Idempotent.
+func (s *Service) RunCarryover(ctx context.Context, orgID uuid.UUID, year int) (AccrualResult, error) {
+	types, err := s.store.ListLeaveTypes(ctx, orgID)
+	if err != nil {
+		return AccrualResult{}, err
+	}
+	workers, err := s.store.ActiveWorkerIDs(ctx, orgID)
+	if err != nil {
+		return AccrualResult{}, err
+	}
+	period := fmt.Sprintf("%d-CO", year)
+
+	tx, err := s.store.Pool().Begin(ctx)
+	if err != nil {
+		return AccrualResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	res := AccrualResult{Period: period}
+	affected := map[uuid.UUID]bool{}
+	for _, lt := range types {
+		if lt.CarryoverMaxHours == nil {
+			continue // unlimited carryover
+		}
+		cap := *lt.CarryoverMaxHours
+		for _, wid := range workers {
+			current, err := s.store.BalanceHours(ctx, tx, orgID, wid, lt.ID)
+			if err != nil {
+				return AccrualResult{}, err
+			}
+			if current <= cap {
+				continue
+			}
+			delta := cap - current // negative: forfeit the excess
+			inserted, err := s.store.RecordAccrualTx(ctx, tx, orgID, wid, lt.ID, period, "carryover", delta)
+			if err != nil {
+				return AccrualResult{}, err
+			}
+			if inserted {
+				if err := s.store.AdjustBalanceTx(ctx, tx, orgID, wid, lt.ID, delta); err != nil {
+					return AccrualResult{}, err
+				}
+				res.HoursCredited += delta
+				affected[wid] = true
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AccrualResult{}, err
+	}
+	res.WorkersCredited = len(affected)
+	return res, nil
 }
 
 // DeleteLeaveType removes a leave type.

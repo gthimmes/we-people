@@ -15,12 +15,16 @@ import (
 // ErrNotFound is returned when an entity does not exist in the org.
 var ErrNotFound = errors.New("not found")
 
-// LeaveType is a category of leave (Vacation, Sick, ...).
+// LeaveType is a category of leave (Vacation, Sick, ...) with accrual config.
 type LeaveType struct {
-	ID     uuid.UUID `json:"id"`
-	OrgID  uuid.UUID `json:"org_id"`
-	Name   string    `json:"name"`
-	IsPaid bool      `json:"is_paid"`
+	ID                 uuid.UUID `json:"id"`
+	OrgID              uuid.UUID `json:"org_id"`
+	Name               string    `json:"name"`
+	IsPaid             bool      `json:"is_paid"`
+	AccrualEnabled     bool      `json:"accrual_enabled"`
+	AccrualAnnualHours float64   `json:"accrual_annual_hours"`
+	MaxBalanceHours    float64   `json:"max_balance_hours"`
+	CarryoverMaxHours  *float64  `json:"carryover_max_hours,omitempty"` // nil = unlimited
 }
 
 // Balance is a worker's remaining hours for a leave type.
@@ -57,27 +61,35 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 // --- Leave types ---
 
-// CreateLeaveType inserts a leave type.
-func (s *Store) CreateLeaveType(ctx context.Context, orgID uuid.UUID, name string, isPaid bool) (LeaveType, error) {
+const leaveTypeCols = `id, org_id, name, is_paid, accrual_enabled, accrual_annual_hours, max_balance_hours, carryover_max_hours`
+
+func scanLeaveType(row pgx.Row) (LeaveType, error) {
 	var lt LeaveType
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO leave_types (org_id, name, is_paid) VALUES ($1,$2,$3)
-		RETURNING id, org_id, name, is_paid`, orgID, name, isPaid).
-		Scan(&lt.ID, &lt.OrgID, &lt.Name, &lt.IsPaid)
+	err := row.Scan(&lt.ID, &lt.OrgID, &lt.Name, &lt.IsPaid, &lt.AccrualEnabled,
+		&lt.AccrualAnnualHours, &lt.MaxBalanceHours, &lt.CarryoverMaxHours)
 	return lt, err
+}
+
+// CreateLeaveType inserts a leave type with its accrual config.
+func (s *Store) CreateLeaveType(ctx context.Context, orgID uuid.UUID, lt LeaveType) (LeaveType, error) {
+	return scanLeaveType(s.pool.QueryRow(ctx, `
+		INSERT INTO leave_types (org_id, name, is_paid, accrual_enabled, accrual_annual_hours, max_balance_hours, carryover_max_hours)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		RETURNING `+leaveTypeCols,
+		orgID, lt.Name, lt.IsPaid, lt.AccrualEnabled, lt.AccrualAnnualHours, lt.MaxBalanceHours, lt.CarryoverMaxHours))
 }
 
 // ListLeaveTypes returns all leave types in an org.
 func (s *Store) ListLeaveTypes(ctx context.Context, orgID uuid.UUID) ([]LeaveType, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, org_id, name, is_paid FROM leave_types WHERE org_id=$1 ORDER BY name`, orgID)
+	rows, err := s.pool.Query(ctx, `SELECT `+leaveTypeCols+` FROM leave_types WHERE org_id=$1 ORDER BY name`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []LeaveType
 	for rows.Next() {
-		var lt LeaveType
-		if err := rows.Scan(&lt.ID, &lt.OrgID, &lt.Name, &lt.IsPaid); err != nil {
+		lt, err := scanLeaveType(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, lt)
@@ -85,17 +97,82 @@ func (s *Store) ListLeaveTypes(ctx context.Context, orgID uuid.UUID) ([]LeaveTyp
 	return out, rows.Err()
 }
 
-// UpdateLeaveType edits a leave type in the org.
-func (s *Store) UpdateLeaveType(ctx context.Context, orgID, id uuid.UUID, name string, isPaid bool) (LeaveType, error) {
-	var lt LeaveType
-	err := s.pool.QueryRow(ctx, `
-		UPDATE leave_types SET name=$3, is_paid=$4 WHERE org_id=$1 AND id=$2
-		RETURNING id, org_id, name, is_paid`, orgID, id, name, isPaid).
-		Scan(&lt.ID, &lt.OrgID, &lt.Name, &lt.IsPaid)
+// UpdateLeaveType edits a leave type and its accrual config.
+func (s *Store) UpdateLeaveType(ctx context.Context, orgID, id uuid.UUID, lt LeaveType) (LeaveType, error) {
+	updated, err := scanLeaveType(s.pool.QueryRow(ctx, `
+		UPDATE leave_types SET name=$3, is_paid=$4, accrual_enabled=$5,
+			accrual_annual_hours=$6, max_balance_hours=$7, carryover_max_hours=$8
+		WHERE org_id=$1 AND id=$2
+		RETURNING `+leaveTypeCols,
+		orgID, id, lt.Name, lt.IsPaid, lt.AccrualEnabled, lt.AccrualAnnualHours, lt.MaxBalanceHours, lt.CarryoverMaxHours))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LeaveType{}, ErrNotFound
 	}
-	return lt, err
+	return updated, err
+}
+
+// AccrualTypes returns leave types with accrual enabled and a positive rate.
+func (s *Store) AccrualTypes(ctx context.Context, orgID uuid.UUID) ([]LeaveType, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+leaveTypeCols+` FROM leave_types WHERE org_id=$1 AND accrual_enabled AND accrual_annual_hours > 0`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LeaveType
+	for rows.Next() {
+		lt, err := scanLeaveType(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, lt)
+	}
+	return out, rows.Err()
+}
+
+// ActiveWorkerIDs returns the ids of active (non-terminated) workers.
+func (s *Store) ActiveWorkerIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM workers WHERE org_id=$1 AND status <> 'terminated'`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// BalanceHours returns a worker's current balance for a leave type (0 if none).
+func (s *Store) BalanceHours(ctx context.Context, tx pgx.Tx, orgID, workerID, leaveTypeID uuid.UUID) (float64, error) {
+	var h float64
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(balance_hours, 0) FROM leave_balances
+		WHERE org_id=$1 AND worker_id=$2 AND leave_type_id=$3`, orgID, workerID, leaveTypeID).Scan(&h)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return h, err
+}
+
+// RecordAccrualTx inserts a ledger entry, returning true only if it was new
+// (the unique key makes re-runs of the same period a no-op).
+func (s *Store) RecordAccrualTx(ctx context.Context, tx pgx.Tx, orgID, workerID, leaveTypeID uuid.UUID, period, kind string, hours float64) (bool, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `
+		INSERT INTO leave_accruals (org_id, worker_id, leave_type_id, period, kind, hours)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (org_id, worker_id, leave_type_id, period, kind) DO NOTHING
+		RETURNING id`, orgID, workerID, leaveTypeID, period, kind, hours).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil // already recorded this period
+	}
+	return err == nil, err
 }
 
 // DeleteLeaveType removes a leave type. Fails (FK) if requests reference it.
@@ -112,9 +189,8 @@ func (s *Store) DeleteLeaveType(ctx context.Context, orgID, id uuid.UUID) error 
 
 // GetLeaveType returns a leave type by id in the org.
 func (s *Store) GetLeaveType(ctx context.Context, orgID, id uuid.UUID) (LeaveType, error) {
-	var lt LeaveType
-	err := s.pool.QueryRow(ctx, `SELECT id, org_id, name, is_paid FROM leave_types WHERE org_id=$1 AND id=$2`, orgID, id).
-		Scan(&lt.ID, &lt.OrgID, &lt.Name, &lt.IsPaid)
+	lt, err := scanLeaveType(s.pool.QueryRow(ctx,
+		`SELECT `+leaveTypeCols+` FROM leave_types WHERE org_id=$1 AND id=$2`, orgID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LeaveType{}, ErrNotFound
 	}
