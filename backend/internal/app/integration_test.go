@@ -885,6 +885,66 @@ func TestCompensation(t *testing.T) {
 	}
 }
 
+func TestReporting(t *testing.T) {
+	srv := testServer(t)
+
+	var reg struct {
+		Token struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token"`
+	}
+	postJSON(t, srv.URL+"/api/v1/auth/register", "", map[string]any{
+		"org_name": fmt.Sprintf("Report Co %d", time.Now().UnixNano()),
+		"email":    "admin@report.co", "password": "password123",
+	}, &reg)
+	admin := reg.Token.AccessToken
+
+	// Two workers in a department, one with comp.
+	var dept struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/departments", admin, map[string]any{"name": "Eng"}, &dept)
+	var pos struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/positions", admin, map[string]any{"title": "Engineer", "department_id": dept.ID}, &pos)
+	var a, b struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "R-1", "first_name": "Rae", "last_name": "One"}, &a)
+	postJSON(t, srv.URL+"/api/v1/workers", admin, map[string]any{"employee_number": "R-2", "first_name": "Ray", "last_name": "Two"}, &b)
+	postJSON(t, srv.URL+"/api/v1/assignments", admin, map[string]any{"worker_id": a.ID, "position_id": pos.ID, "effective_date": "2024-01-01"}, nil)
+	postJSON(t, srv.URL+"/api/v1/compensation", admin, map[string]any{"worker_id": a.ID, "effective_date": "2024-01-01", "amount": 100000}, nil)
+
+	var rep struct {
+		Headcount       int `json:"headcount"`
+		HeadcountByDept []struct {
+			Label string `json:"label"`
+			Count int    `json:"count"`
+		} `json:"headcount_by_department"`
+		Compensation *struct {
+			AvgAnnual float64 `json:"avg_annual"`
+		} `json:"compensation"`
+	}
+	if s := getJSON(t, srv.URL+"/api/v1/reports", admin, &rep); s != http.StatusOK {
+		t.Fatalf("reports status = %d", s)
+	}
+	if rep.Headcount != 2 {
+		t.Errorf("headcount = %d, want 2", rep.Headcount)
+	}
+	// One worker is in Eng, one unassigned.
+	got := map[string]int{}
+	for _, x := range rep.HeadcountByDept {
+		got[x.Label] = x.Count
+	}
+	if got["Eng"] != 1 || got["Unassigned"] != 1 {
+		t.Errorf("headcount by dept = %+v", got)
+	}
+	if rep.Compensation == nil || rep.Compensation.AvgAnnual != 100000 {
+		t.Errorf("comp avg = %+v, want 100000", rep.Compensation)
+	}
+}
+
 func putJSON(t *testing.T, url, token string, body any, out any) int {
 	t.Helper()
 	buf, _ := json.Marshal(body)

@@ -8,6 +8,7 @@ import OrgManage from "./pages/OrgManage";
 import OrgChart from "./pages/OrgChart";
 import TimeOff from "./pages/TimeOff";
 import Onboarding from "./pages/Onboarding";
+import Analytics from "./pages/Analytics";
 import Team from "./pages/Team";
 import NotificationBell from "./components/NotificationBell";
 
@@ -32,6 +33,7 @@ export default function App() {
           <NavLink to="/org-chart">Org chart</NavLink>
           <NavLink to="/time-off">Time off</NavLink>
           <NavLink to="/onboarding">Onboarding</NavLink>
+          <NavLink to="/analytics">Analytics</NavLink>
           {canManageUsers && <NavLink to="/team">Team &amp; access</NavLink>}
         </nav>
         <div className="sidebar-footer">
@@ -54,6 +56,7 @@ export default function App() {
             <Route path="/org-chart" element={<OrgChart />} />
             <Route path="/time-off" element={<TimeOff />} />
             <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/team" element={<Team />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

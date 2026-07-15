@@ -320,6 +320,46 @@ label {
   color: var(--brand);
 }
 
+/* Analytics bar charts */
+.bar-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bar-row {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+.bar-label {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-track {
+  height: 20px;
+  background: var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 6px;
+  min-width: 2px;
+  transition: width 0.3s;
+}
+.bar-value {
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 60px;
+  text-align: right;
+  color: var(--muted);
+}
+
 /* Compensation */
 .comp-current {
   margin-bottom: 10px;

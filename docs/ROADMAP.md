@@ -94,8 +94,11 @@ Most complex + compliance-heavy — built last on a solid HRIS + comp/benefits.
 - Tax filings (W-2, 941/940), GL export
 
 ### Phase 7 — Compliance, Analytics & Platform *(ongoing)*
+- [x] **People analytics** — headcount by department/location, workforce
+  composition, gender diversity, 12-month turnover + hire/term trend, leave
+  liability, and compensation-by-department (permission-gated) *(Tier 2)*
 - EEO-1, ACA, I-9/E-Verify, OSHA
-- Report builder, people analytics dashboards
+- Report builder + scheduled/exported reports
 - Public API, webhooks, SCIM
 - Mobile, localization depth, SOC 2 hardening
 

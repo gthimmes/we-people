@@ -20,6 +20,7 @@ import (
 	"github.com/gthimmes/we-people/backend/internal/onboarding"
 	"github.com/gthimmes/we-people/backend/internal/org"
 	"github.com/gthimmes/we-people/backend/internal/orgstructure"
+	"github.com/gthimmes/we-people/backend/internal/reporting"
 	"github.com/gthimmes/we-people/backend/internal/timeoff"
 	"github.com/gthimmes/we-people/backend/internal/worker"
 )
@@ -49,6 +50,7 @@ func New(db *database.DB, cfg config.Config) *App {
 	dashStore := dashboard.NewStore(pool)
 	onboardStore := onboarding.NewStore(pool)
 	compStore := compensation.NewStore(pool)
+	reportStore := reporting.NewStore(pool)
 
 	// Services
 	notifSvc := notifications.NewService(notifStore)
@@ -79,6 +81,7 @@ func New(db *database.DB, cfg config.Config) *App {
 	dashHandler := dashboard.NewHandler(dashStore)
 	onboardHandler := onboarding.NewHandler(onboardSvc)
 	compHandler := compensation.NewHandler(compSvc)
+	reportHandler := reporting.NewHandler(reportStore)
 
 	// Auth middleware (loads permissions from the IAM store)
 	authMW := auth.NewMiddleware(tokens, iamStore)
@@ -110,6 +113,7 @@ func New(db *database.DB, cfg config.Config) *App {
 			r.Group(iamHandler.AdminRoutes)
 			r.Group(onboardHandler.Routes)
 			r.Group(compHandler.Routes)
+			r.Group(reportHandler.Routes)
 			r.Group(structHandler.Routes)
 		})
 	})

@@ -384,3 +384,25 @@ export interface DashboardSummary {
   out_today: { worker_id: string; name: string; leave_type: string; end_date: string }[];
   recent_hires: { worker_id: string; name: string; hire_date?: string; title?: string }[];
 }
+
+export interface Bucket {
+  label: string;
+  count: number;
+}
+
+export interface ReportData {
+  headcount: number;
+  headcount_by_department: Bucket[];
+  headcount_by_location: Bucket[];
+  status_breakdown: Bucket[];
+  gender_breakdown: Bucket[];
+  hires_12mo: number;
+  terminations_12mo: number;
+  turnover_rate: number;
+  monthly_trend: { month: string; hires: number; terminations: number }[];
+  time_off: { balance_liability_hours: number; pending_requests: number; approved_upcoming_hours: number };
+  compensation?: {
+    avg_annual: number;
+    by_department: { label: string; avg: number; count: number }[];
+  } | null;
+}
