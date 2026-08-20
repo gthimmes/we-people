@@ -11,6 +11,7 @@ import Onboarding from "./pages/Onboarding";
 import Analytics from "./pages/Analytics";
 import Team from "./pages/Team";
 import NotificationBell from "./components/NotificationBell";
+import HelpWidget from "./components/HelpWidget";
 
 export default function App() {
   const { me, loading, logout } = useAuth();
@@ -62,6 +63,7 @@ export default function App() {
           </Routes>
         </div>
       </main>
+      <HelpWidget />
     </div>
   );
 }

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "help-navigator": "github:gthimmes/help-navigator",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"
